@@ -96,6 +96,23 @@ export class ConnectionManager {
    * connects via the appropriate transport, performs MCP handshake,
    * fetches tools/resources/prompts, and registers proxied capabilities.
    */
+  /**
+   * Names of declared auth env vars the server needs that aren't available in
+   * the current environment or the explicitly-provided `env`. Used to warn the
+   * user before a server crashes on a missing API key.
+   */
+  private missingAuthEnv(
+    server: RegistryServer,
+    providedEnv?: Record<string, string>,
+  ): string[] {
+    const names = (server.authDetails?.envVars || [])
+      .map((e) => e.name)
+      .filter(Boolean);
+    return names.filter(
+      (n) => !process.env[n] && !(providedEnv && providedEnv[n]),
+    );
+  }
+
   async connect(params: ConnectParams): Promise<ConnectResult> {
     // Resolve slug, command/url, and transport type
     let slug: string;
@@ -185,19 +202,53 @@ export class ConnectionManager {
       );
     }
 
+    // Docker MCP servers speak over stdio — ensure the container keeps stdin
+    // attached (-i) and is cleaned up (--rm), or the MCP handshake never happens
+    // and the server appears to "crash on start".
+    if (command === "docker" && args && args[0] === "run") {
+      const rest = args.slice(1);
+      const hasI = rest.some(
+        (a) => a === "-i" || a === "--interactive" || /^-[a-zA-Z]*i[a-zA-Z]*$/.test(a),
+      );
+      const inject: string[] = [];
+      if (!hasI) inject.push("-i");
+      if (!rest.includes("--rm")) inject.push("--rm");
+      if (inject.length > 0) args = ["run", ...inject, ...rest];
+    }
+
     // Check trust policy — require confirmation for community/unknown tier
     const policy = getTrustPolicy(trustTier);
     if (!policy.allowByDefault) {
       throw new PermissionDeniedError(slug, `Connection to "${slug}" is blocked by trust policy (${trustTier}).`);
     }
-    if (policy.requiresConfirmation && !params.confirmed) {
-      log.info("Connection requires user confirmation", { slug, trustTier });
+    // Pre-connect checks: trust-tier confirmation + a missing-auth-env warning,
+    // surfaced together so the user can set keys before the server crashes on
+    // startup (the #1 real-world connect failure).
+    const missingEnv = registryServer
+      ? this.missingAuthEnv(registryServer, params.env)
+      : [];
+    const needTrustConfirm = policy.requiresConfirmation && !params.confirmed;
+    const needEnvWarn = missingEnv.length > 0 && !params.confirmed;
+    if (needTrustConfirm || needEnvWarn) {
+      log.info("Connection requires confirmation", { slug, trustTier, missingEnv });
+      const parts: string[] = [];
+      if (needTrustConfirm) {
+        parts.push(`⚠️ **${displayName}** has trust tier [${trustTier}]. ${policy.description}`);
+      }
+      if (needEnvWarn) {
+        parts.push(
+          `🔑 **${displayName}** needs ${missingEnv.length} environment variable(s) that aren't set: ${missingEnv
+            .map((v) => "`" + v + "`")
+            .join(", ")}.\nSet them in your shell, or pass them via \`env: { ... }\`, then reconnect.`,
+        );
+      }
+      parts.push("To proceed anyway, call `mcp_connect` again with `confirmed: true`.");
       const confirmation: ConfirmationRequired = {
         needsConfirmation: true,
         slug,
         displayName,
         trustTier,
-        warning: `⚠️ **${displayName}** has trust tier [${trustTier}]. ${policy.description}\n\nTo proceed, call \`mcp_connect\` again with \`confirmed: true\`.`,
+        warning: parts.join("\n\n"),
       };
       return confirmation;
     }
