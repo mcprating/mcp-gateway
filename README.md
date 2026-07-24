@@ -94,7 +94,7 @@ The gateway reads config from `~/.mcp-gateway/config.json`:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MCP_GATEWAY_REGISTRY_URL` | MCP-Rating API base URL | `http://localhost:3000/api/v1` |
+| `MCP_GATEWAY_REGISTRY_URL` | MCP-Rating API base URL | `https://mcprating.io/api/v1` |
 | `MCP_GATEWAY_TIMEOUT` | Proxy timeout (ms) | `30000` |
 | `MCP_GATEWAY_MAX_CONNECTIONS` | Max simultaneous connections | `10` |
 | `MCP_GATEWAY_LOG_LEVEL` | Log level (debug/info/warn/error) | `info` |

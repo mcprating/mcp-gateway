@@ -9,7 +9,9 @@ const DEFAULT_PERMISSIONS_PATH = join(GATEWAY_DIR, "permissions.json");
 const DEFAULT_PROFILES_PATH = join(GATEWAY_DIR, "profiles.json");
 
 const DEFAULTS: GatewayConfig = {
-  registryApiUrl: "http://localhost:3000/api/v1",
+  // Public hosted registry. Point at a local instance for development with
+  // MCP_GATEWAY_REGISTRY_URL=http://localhost:3000/api/v1
+  registryApiUrl: "https://mcprating.io/api/v1",
   proxyTimeoutMs: 30_000,
   maxConnections: 10,
   logLevel: "info",
