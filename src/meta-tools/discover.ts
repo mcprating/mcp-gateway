@@ -58,7 +58,26 @@ export function registerDiscover(
           const requiresAuth = server.requiresAuth || server.metadata?.requiresAuth;
           const authLabel = requiresAuth ? "🔑 Auth Required" : "";
 
-          const stats = [stars, downloads, cat, tools, discovery, authLabel]
+          // How you run it — the single most useful thing to know at discovery time.
+          const amLabels: Record<string, string> = {
+            npm: "npx",
+            pypi: "uvx",
+            docker: "Docker",
+            remote: "Remote (URL)",
+            "github-manual": "manual build",
+          };
+          const access = server.accessMethod
+            ? amLabels[server.accessMethod] || server.accessMethod
+            : "";
+
+          // Surface the safety screen here, not just on connect — "judge before
+          // you run" only works if the warning arrives while choosing.
+          const safety =
+            typeof server.safetyScore === "number" && server.safetyScore < 50
+              ? `⚠️ Safety ${server.safetyScore}`
+              : "";
+
+          const stats = [access, stars, downloads, cat, tools, discovery, authLabel, safety]
             .filter(Boolean)
             .join(" · ");
 
@@ -75,10 +94,14 @@ export function registerDiscover(
             lines.push(`🔑 Requires: ${authEnvVars.map(ev => `\`${ev.name}\``).join(", ")}`);
           }
 
+          // Remote servers have no install command by design — you connect by URL.
+          // Warning on those read as "broken server" when nothing was wrong.
           lines.push(
             server.installCommand
               ? `🔧 Install: \`${server.installCommand}\``
-              : "⚠️ No install command available",
+              : server.accessMethod === "remote"
+                ? "🌐 Hosted server — no install needed"
+                : "⚠️ No install command recorded (try connecting by slug)",
           );
 
           // Build connect suggestion with env template if auth is required

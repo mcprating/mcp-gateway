@@ -19,6 +19,11 @@ export interface RegistryServer {
   /** Heuristic UI capability from the registry ("UI-capable (detected)"). */
   supportsUi?: boolean;
   uiType?: string | null;
+  /** How the server is run: npm | pypi | docker | remote | github-manual. */
+  accessMethod?: string | null;
+  /** Supply-chain safety screen, 0-100 (>=80 safe, 50-79 caution, <50 risk). */
+  safetyScore?: number | null;
+  safetyFlags?: string[] | null;
   category: { slug: string; name: string } | null;
   tools: { name: string; description: string | null }[];
   resources: { uri: string; name: string; description: string | null }[];
