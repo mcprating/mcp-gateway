@@ -12,6 +12,19 @@
     "dist",
     "README.md"
   ],
+  "homepage": "https://mcprating.io/gateway",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mcprating/platform.git",
+    "directory": "packages/gateway"
+  },
+  "bugs": {
+    "url": "https://github.com/mcprating/platform/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
