@@ -101,7 +101,11 @@ export function registerDiscover(
               ? `🔧 Install: \`${server.installCommand}\``
               : server.accessMethod === "remote"
                 ? "🌐 Hosted server — no install needed"
-                : "⚠️ No install command recorded (try connecting by slug)",
+                // Connecting by slug CANNOT work without an install command — the
+                // gateway has nothing to spawn. Point at the real options instead.
+                : `⚠️ No install command recorded — connect with explicit \`command\`/\`args\`${
+                    server.repositoryUrl ? ` (see ${server.repositoryUrl})` : ""
+                  }`,
           );
 
           // Build connect suggestion with env template if auth is required
