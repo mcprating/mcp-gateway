@@ -1,6 +1,7 @@
 {
   "name": "@mcp-rating/gateway",
-  "version": "0.2.0",
+  "version": "0.2.1",
+  "mcpName": "io.mcprating/gateway",
   "description": "MCP Gateway — auto-discover, connect, and proxy MCP servers from any AI desktop client",
   "type": "module",
   "main": "./dist/index.js",
