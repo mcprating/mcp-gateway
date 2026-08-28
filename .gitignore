@@ -1,2 +1,9 @@
-dist/
 node_modules/
+dist/
+*.tsbuildinfo
+*.log
+.DS_Store
+.idea/
+.vscode/
+# MCP Registry DNS auth private key — never commit
+key.pem

@@ -16,14 +16,14 @@
   "homepage": "https://mcprating.io/gateway",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mcprating/platform.git",
-    "directory": "packages/gateway"
+    "url": "git+https://github.com/mcprating/mcp-gateway.git"
   },
   "bugs": {
-    "url": "https://github.com/mcprating/platform/issues"
+    "url": "https://github.com/mcprating/mcp-gateway/issues"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "exports": {
     ".": {
