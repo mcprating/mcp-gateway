@@ -5,5 +5,12 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+
+# This is a published library, not an application: consumers resolve their own
+# versions, so the lockfile only describes whoever last ran npm install here.
+# Note the publish workflow must keep using `npm install` — `npm ci` requires a
+# lockfile and would fail against this.
+package-lock.json
+
 # MCP Registry DNS auth private key — never commit
 key.pem
