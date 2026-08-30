@@ -21,6 +21,11 @@ jobs:
       - run: npm install
       - run: npm run build
 
+      # The sandbox tests pin the two controls this package exists to provide:
+      # environment scoping and the egress allowlist. Publishing a build that
+      # fails them would ship a security regression to everyone on `latest`.
+      - run: npm test
+
       - name: Verify tag matches package version
         run: |
           TAG="${GITHUB_REF_NAME#v}"

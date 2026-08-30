@@ -42,7 +42,8 @@
     "start:daemon": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test:e2e": "node --import tsx test-e2e.mjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "vitest run"
   },
   "keywords": [
     "mcp",
@@ -69,6 +70,7 @@
     "@types/node": "^25.2.3",
     "@types/ws": "^8.18.1",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   }
 }

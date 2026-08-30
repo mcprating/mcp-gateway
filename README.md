@@ -98,6 +98,70 @@ The gateway reads config from `~/.mcp-gateway/config.json`:
 | `MCP_GATEWAY_TIMEOUT` | Proxy timeout (ms) | `30000` |
 | `MCP_GATEWAY_MAX_CONNECTIONS` | Max simultaneous connections | `10` |
 | `MCP_GATEWAY_LOG_LEVEL` | Log level (debug/info/warn/error) | `info` |
+| `MCP_GATEWAY_CONTAINER_ISOLATION` | Force L2 container isolation on/off | manifest decides |
+| `MCP_GATEWAY_AUDIT_LOG` | Path for the forensic audit log | disabled |
+| `MCP_GATEWAY_PARTNER_KEY` | Partner attribution key — **enables ad telemetry** | unset |
+| `MCP_GATEWAY_AD_TRACKING` | Set to `false` to disable ad telemetry outright | unset |
+| `MCP_GATEWAY_HTTP_TOKEN` | Bearer token for HTTP daemon mode | unset |
+
+## Security model
+
+The gateway exists because plain MCP hands every server your whole environment.
+Two layers push back, and it is worth being precise about what each one does and
+does not do.
+
+### L1 — environment scoping (always on, for stdio servers)
+
+A downstream server receives `PATH`, `HOME` and friends, plus only the variable
+**names** its manifest allowlists or you pass at connect time. Everything else in
+the parent environment — `AWS_*`, `OPENAI_API_KEY`, `DATABASE_URL` — is withheld.
+Exported shell functions (`BASH_FUNC_*`) are dropped rather than forwarded.
+
+This is genuine enforcement: the child process is spawned with a constructed
+environment, so there is nothing to opt out of or bypass.
+
+### L2 — container isolation (opt-in)
+
+When a manifest requests it, or `MCP_GATEWAY_CONTAINER_ISOLATION=true`, the
+server runs under `docker`/`podman` with an ephemeral container.
+
+### Network allowlists: read this before relying on them
+
+`network: "allowlist"` starts an in-process forward proxy and points the child at
+it via `HTTP_PROXY`/`HTTPS_PROXY`.
+
+**This filters proxy-aware clients only.** Node's fetch/undici, axios, and Python
+requests all honour those variables, which covers most real servers. A program
+that opens raw TCP sockets, or a compiled binary that ignores proxy environment
+variables, **is not filtered**. Treat allowlists in L1 as a guard rail against
+honest code, not a containment boundary against hostile code — for that you need
+L2 with container network namespacing.
+
+Allowlist patterns fail **closed**: a malformed pattern such as `*example.com`
+(missing dot) matches nothing rather than everything. The gateway warns at
+startup about patterns that will not do what their author intended, including
+over-broad ones like `*.com`.
+
+### What is not covered
+
+If the host client is `SIGKILL`ed, the gateway cannot run its shutdown path and
+spawned child processes may be left behind. `SIGINT`/`SIGTERM` are handled and
+disconnect everything cleanly; `SIGKILL` is untrappable by definition.
+
+## Telemetry
+
+**Off unless you turn it on.** The ad tracker is constructed only when
+`MCP_GATEWAY_PARTNER_KEY` is set — with no partner key there is no partner
+telemetry, and nothing is posted about your connects or tool calls.
+
+If a partner key is set (you are earning attribution revenue), connect and
+tool-execution events are sent to mcprating.io. Disable it while keeping the key
+with `MCP_GATEWAY_AD_TRACKING=false`.
+
+Separately, the gateway calls the MCP-Rating registry API for `mcp_discover` and
+`mcp_recommend` — that is the lookup you asked for, not background reporting.
+Usage analytics (`mcp_usage`) are an in-memory ring buffer and never leave the
+process.
 
 ## Development
 

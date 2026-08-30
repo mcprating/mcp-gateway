@@ -11,6 +11,61 @@ import { log } from "../utils/logger.js";
  *   - "*.githubusercontent.com" wildcard subdomain, any port
  *   - "*.example.com:443"       wildcard subdomain + port
  */
+/**
+ * Report allowlist patterns that will not behave the way their author expects.
+ *
+ * Matching fails CLOSED — a malformed pattern like `*example.com` (no dot)
+ * matches no real hostname rather than matching everything — so this is not a
+ * bypass. It is worse in a quieter way: the author believes they granted access,
+ * the server is silently cut off from the internet, and the failure surfaces as
+ * an unrelated timeout inside somebody else's package.
+ *
+ * The opposite mistake is `*.com`, which is syntactically fine and grants a
+ * third of the web. Both deserve to be said out loud at load time.
+ */
+export function lintAllowlist(allowlist: string[]): string[] {
+  const problems: string[] = [];
+  // Public suffixes where a wildcard is almost certainly a mistake. Not
+  // exhaustive by design — this is a nudge, not a policy engine.
+  const BROAD = new Set(["com", "net", "org", "io", "dev", "app", "co", "ai"]);
+
+  for (const raw of allowlist) {
+    const pattern = raw.toLowerCase().trim();
+    if (!pattern) continue;
+
+    const colons = (pattern.match(/:/g) ?? []).length;
+    if (colons > 1) {
+      problems.push(`"${raw}": more than one ":" — host:port expected (IPv6 literals are not supported)`);
+      continue;
+    }
+    const [patHost, patPort] = colons === 1 ? pattern.split(":") : [pattern, undefined];
+
+    if (patPort !== undefined && !/^\d{1,5}$/.test(patPort)) {
+      problems.push(`"${raw}": port "${patPort}" is not a number — this pattern can never match`);
+    }
+    if (patHost.includes("*")) {
+      if (!patHost.startsWith("*.")) {
+        problems.push(
+          `"${raw}": wildcards must be written "*.example.com" — as written this matches nothing`,
+        );
+        continue;
+      }
+      if (patHost.slice(2).includes("*")) {
+        problems.push(`"${raw}": only one leading "*." wildcard is supported — this matches nothing`);
+        continue;
+      }
+      // A wildcard is too broad when what follows it is a public suffix rather
+      // than somebody's domain — either a bare TLD ("*.com") or a known one.
+      // One rule, because the two-branch version made the second unreachable.
+      const base = patHost.slice(2);
+      if (base.split(".").length < 2 || BROAD.has(base)) {
+        problems.push(`"${raw}": wildcard over the public suffix "${base}" grants most of the web`);
+      }
+    }
+  }
+  return problems;
+}
+
 export function matchesAllowlist(
   host: string,
   port: number,
@@ -70,7 +125,13 @@ export class EgressProxy {
         reason?: string;
       }) => void;
     },
-  ) {}
+  ) {
+    // Say it once, at construction, rather than leaving the author to infer a
+    // typo'd allowlist from a downstream package's connection timeout.
+    for (const problem of lintAllowlist(allowlist)) {
+      log.warn(`egress allowlist for "${slug}" — ${problem}`);
+    }
+  }
 
   /** Start listening on a random loopback port. Resolves with the port. */
   async start(): Promise<number> {
