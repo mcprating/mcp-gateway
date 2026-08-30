@@ -1,6 +1,40 @@
 # @mcp-rating/gateway
 
-**MCP Gateway** is a meta-MCP server that auto-discovers, connects, and proxies other MCP servers. Add one line to your AI desktop client config and get dynamic access to the entire MCP ecosystem.
+**Run MCP servers without handing them your API keys.**
+
+Adding an MCP server to your client today spawns somebody else's code with your
+entire environment attached — `AWS_SECRET_ACCESS_KEY`, `OPENAI_API_KEY`,
+`DATABASE_URL`, everything in your shell. The gateway spawns them with a
+constructed environment instead: `PATH`, `HOME`, and only the variables you or
+its manifest name. Nothing else is there to read.
+
+It is also a meta-server: one entry in your config gives you the whole registry,
+connected on demand rather than pre-loaded.
+
+```json
+{ "mcpServers": { "gateway": { "command": "npx", "args": ["-y", "@mcp-rating/gateway"] } } }
+```
+
+## Why it uses less of your context
+
+Every MCP server you configure statically injects its full tool schema into
+every turn, whether you use it or not. The gateway exposes 13 meta-tools at a
+fixed cost and loads a server's tools only once you connect to it.
+
+| | measured |
+|---|--:|
+| Mean per real MCP server | **~1,500 tokens** |
+| 10 servers configured statically | **~15,100 tokens, every turn** |
+| Gateway, flat | **~2,800 tokens** |
+
+Roughly **5× less** standing overhead at ten servers, and the gap widens with
+each one you add.
+
+*Honest about the method:* measured from 6 servers this project connected to and
+introspected, sized as `chars / 4`. It is an estimate from a small sample, not a
+benchmark. And it is standing overhead only — connecting to a server pays that
+server's schema cost at connect time. The saving is real precisely because most
+configured servers sit unused in most conversations.
 
 ## How It Works
 
@@ -47,26 +81,63 @@ Then ask Claude:
 - *"Connect to the sqlite server"* (uses `mcp_connect`)
 - *"Query my database"* (calls the proxied tool directly)
 
-### With Any MCP Client
+### Cursor
+
+`~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project):
 
 ```json
 {
-  "command": "npx",
-  "args": ["-y", "@mcp-rating/gateway"]
+  "mcpServers": {
+    "gateway": { "command": "npx", "args": ["-y", "@mcp-rating/gateway"] }
+  }
 }
 ```
 
+### Claude Code
+
+```bash
+claude mcp add gateway -- npx -y @mcp-rating/gateway
+```
+
+### Windsurf
+
+`~/.codeium/windsurf/mcp_config.json`, same shape as Cursor:
+
+```json
+{
+  "mcpServers": {
+    "gateway": { "command": "npx", "args": ["-y", "@mcp-rating/gateway"] }
+  }
+}
+```
+
+### Any other MCP client
+
+```json
+{ "command": "npx", "args": ["-y", "@mcp-rating/gateway"] }
+```
+
+Restart the client after editing its config — most read it only at startup.
+
 ## Meta-Tools
 
-The gateway exposes 5 built-in tools:
+The gateway exposes 13 built-in tools:
 
 | Tool | Description |
 |------|-------------|
-| `mcp_discover` | Search the MCP-Rating registry for servers |
-| `mcp_connect` | Connect to a server (by slug or explicit command) |
+| `mcp_discover` | Search the MCP-Rating registry for MCP servers |
+| `mcp_connect` | Connect to a server and make its tools available |
 | `mcp_disconnect` | Disconnect a server and remove its tools |
-| `mcp_list_active` | List all connected servers |
-| `mcp_server_info` | Get detailed info about a server |
+| `mcp_list_active` | List connected servers and their tools |
+| `mcp_server_info` | Detailed info about a server, from the registry or a live connection |
+| `mcp_call_tool` | Call a tool on a connected server |
+| `mcp_gateway_health` | Diagnostics: version, uptime, connection and registry status |
+| `mcp_sandbox` | View or customise a server's sandbox manifest (env/network/filesystem) |
+| `mcp_audit` | The safety audit trail — what sandboxed servers actually did |
+| `mcp_profiles` | Named connection profiles (work, personal, …) |
+| `mcp_groups` | Atomic connect/disconnect of server sets |
+| `mcp_usage` | Call counts, latency and error rates for connected servers |
+| `mcp_recommend` | Server recommendations based on usage |
 
 ## Trust Tiers
 
@@ -83,7 +154,7 @@ The gateway reads config from `~/.mcp-gateway/config.json`:
 
 ```json
 {
-  "registryApiUrl": "https://mcp-rating.example.com/api/v1",
+  "registryApiUrl": "https://mcprating.io/api/v1",
   "proxyTimeoutMs": 30000,
   "maxConnections": 10,
   "logLevel": "info"
@@ -166,17 +237,11 @@ process.
 ## Development
 
 ```bash
-# Install dependencies
-pnpm install
-
-# Run in development mode
-pnpm dev
-
-# Type check
-pnpm typecheck
-
-# Build
-pnpm build
+npm install
+npm run dev        # watch mode
+npm run typecheck
+npm run build
+npm test           # sandbox unit tests (env scoping + egress allowlist)
 ```
 
 ## Architecture
