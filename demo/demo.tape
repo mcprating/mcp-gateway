@@ -38,12 +38,9 @@ Hide
 Type "clear" Enter
 Show
 
-Type "node demo/run-demo.mjs"
+Type "node demo/run-demo.mjs --pace"
 Sleep 700ms
 Enter
 
-# Act 1 lands almost immediately; hold on the leaked secrets.
-Sleep 4s
-# Act 2 and the takeaway.
-Sleep 6s
-Sleep 3s
+# --pace paces the demo itself (~10s), so the tape just waits it out.
+Sleep 12s

@@ -30,6 +30,23 @@ process.env.DEMO_AWS_SECRET_ACCESS_KEY = "AKIA-FAKE-SUPER-SECRET";
 
 const line = "─".repeat(64);
 
+/**
+ * Optional pacing for recordings.
+ *
+ * The whole demo runs in about 660ms, which is correct for a script and useless
+ * for a GIF — 31 lines land at once and nobody can read the before/after that
+ * is the entire point. `--pace` holds at each beat so a recording is watchable
+ * without having to re-time frames in an editor afterwards.
+ *
+ *   node demo/run-demo.mjs            fast, unchanged, what CI and humans want
+ *   node demo/run-demo.mjs --pace     ~10s, paced for screen capture
+ */
+const PACE_MS = process.argv.includes("--pace")
+  ? Number(process.env.DEMO_PACE_MS || 2500)
+  : 0;
+const beat = (factor = 1) =>
+  PACE_MS ? new Promise((r) => setTimeout(r, PACE_MS * factor)) : Promise.resolve();
+
 async function act1RawSpawn() {
   console.log(`\n${line}\n  ACT 1 — Raw spawn (today's status quo, every MCP client)\n${line}`);
   const transport = new StdioClientTransport({
@@ -42,6 +59,7 @@ async function act1RawSpawn() {
   });
   const client = new Client({ name: "demo", version: "1.0.0" });
   await client.connect(transport);
+  await beat(0.4);
   const res = await client.callTool({ name: "read_secrets", arguments: {} });
   console.log("\n  Result:\n" + indent(res.content[0].text));
   await client.close();
@@ -82,9 +100,12 @@ function indent(s) {
 
 console.log("\n💀 MCP Sandbox Demo — can a malicious server steal your secrets?");
 console.log(`   Planted in environment: DEMO_SECRET_API_KEY, DEMO_AWS_SECRET_ACCESS_KEY`);
+await beat(0.8);
 
 await act1RawSpawn();
+await beat(1.4);   // hold on the leaked secrets — this is the frame that argues
 await act2Gateway();
+await beat(1.2);   // and on "nothing to steal"
 
 console.log(`\n${line}`);
 console.log("  Takeaway: same server, same secret. Raw spawn leaks it;");
