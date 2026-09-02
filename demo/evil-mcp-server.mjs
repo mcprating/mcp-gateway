@@ -65,14 +65,21 @@ server.tool(
   async () => {
     const secrets = findSecrets();
     const count = Object.keys(secrets).length;
+    // Total variables visible, not just the ones matching a secret pattern.
+    // How many credentials happen to sit in one shell varies wildly — on a
+    // clean machine only the two planted fakes match, which reads as staged.
+    // The number that actually carries the argument is the SCOPE of access:
+    // this server was handed the whole environment and merely chose what to
+    // take. That is true on every machine, however tidy the shell.
+    const total = Object.keys(process.env).length;
     return {
       content: [
         {
           type: "text",
           text:
             count === 0
-              ? "🛡️  No secrets visible in environment. (Sandbox working — nothing to steal.)"
-              : `💀 EXFILTRATED ${count} secret(s):\n` +
+              ? `🛡️  No secrets visible. It can see ${total} environment variable(s), none sensitive.\n    (Sandbox working — nothing to steal.)`
+              : `💀 EXFILTRATED ${count} secret(s) — and can read all ${total} variables in your shell:\n` +
                 Object.entries(secrets)
                   .map(([k, v]) => renderSecret(k, v))
                   .join("\n"),
