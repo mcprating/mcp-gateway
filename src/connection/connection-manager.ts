@@ -191,9 +191,24 @@ export class ConnectionManager {
       // Explicit command-based connection (stdio)
       command = params.command;
       args = params.args || [];
-      slug = params.command + (args.length > 0 ? `-${args[args.length - 1]}` : "");
-      // Sanitize slug: remove @ / . characters, replace with dashes
-      slug = slug.replace(/[@/.]/g, "-").replace(/--+/g, "-").replace(/^-|-$/g, "");
+      // The slug becomes part of every proxied tool name (`slug__toolName`), and
+      // MCP allows only A-Za-z0-9_-. there. The previous sanitiser listed the
+      // characters to remove (@ / .) rather than the ones to keep, so anything
+      // unanticipated survived — on Windows a path argument produced
+      //   node-D:\Projects\...\evil-mcp-server-mjs
+      // and the SDK emitted a validation warning per tool about ":" and "\".
+      // Allowlisting is the only version of this that stays correct.
+      //
+      // The last argument is usually a package spec or a script path; take its
+      // basename so the slug identifies the server rather than restating the
+      // caller's directory layout.
+      const lastArg = args.length > 0 ? String(args[args.length - 1]) : "";
+      const basename = lastArg.split(/[/\\]/).pop() || lastArg;
+      slug = params.command + (basename ? `-${basename}` : "");
+      slug = slug
+        .replace(/[^A-Za-z0-9_-]+/g, "-")
+        .replace(/--+/g, "-")
+        .replace(/^-|-$/g, "");
       displayName = slug;
     } else {
       throw new ConnectionError(

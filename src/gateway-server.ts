@@ -16,6 +16,7 @@ import { AutoRecommender } from "./discovery/auto-recommender.js";
 import { ManifestResolver } from "./sandbox/manifest-resolver.js";
 import { AuditLog } from "./audit/audit-log.js";
 import { primeProxyHandlers } from "./proxy/prime-handlers.js";
+import { setLogLevel } from "./utils/logger.js";
 import { dirname, join } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -74,6 +75,14 @@ export function createGatewayServer(
   config: GatewayConfig,
   shared: SharedSingletons = {},
 ): GatewayContext {
+  // Apply here, not only in the CLI entry point. Anything that builds a gateway
+  // by calling this directly — the demo, tests, an embedding host — otherwise
+  // gets INFO output no matter what its config says, because index.ts is the
+  // only thing that was calling setLogLevel. A config field that works through
+  // one entry point and silently does nothing through another is worse than not
+  // having it.
+  setLogLevel(config.logLevel);
+
   const mcpServer = new McpServer(
     {
       name: "mcp-gateway",
