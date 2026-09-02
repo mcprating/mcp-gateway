@@ -8,6 +8,15 @@ entire environment attached — `AWS_SECRET_ACCESS_KEY`, `OPENAI_API_KEY`,
 constructed environment instead: `PATH`, `HOME`, and only the variables you or
 its manifest name. Nothing else is there to read.
 
+<!-- Absolute URL on purpose: relative image paths render on GitHub but break on
+     npmjs.com, which is where anyone arriving via `npx` reads this. -->
+![The same deliberately malicious MCP server, run twice: on a raw spawn it reads every
+variable in the shell; through the gateway it sees fifteen, none sensitive.](https://raw.githubusercontent.com/mcprating/mcp-gateway/main/demo/sandbox-demo.gif)
+
+*The same malicious server, run twice. Reproduce it yourself: `node demo/run-demo.mjs`
+— it plants two fake credentials and reads your real environment, printing only the
+count and the planted values.*
+
 It is also a meta-server: one entry in your config gives you the whole registry,
 connected on demand rather than pre-loaded.
 
