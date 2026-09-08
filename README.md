@@ -1,5 +1,10 @@
 # @mcp-rating/gateway
 
+[![npm](https://img.shields.io/npm/v/@mcp-rating/gateway?style=flat-square)](https://www.npmjs.com/package/@mcp-rating/gateway)
+[![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](./LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-compatible-blue?style=flat-square)](https://modelcontextprotocol.io)
+[![tests](https://img.shields.io/badge/sandbox%20tests-18-brightgreen?style=flat-square)](./src/sandbox/sandbox.test.ts)
+
 **Run MCP servers without handing them your API keys.**
 
 Adding an MCP server to your client today spawns somebody else's code with your
@@ -13,9 +18,14 @@ its manifest name. Nothing else is there to read.
 ![The same deliberately malicious MCP server, run twice: on a raw spawn it reads every
 variable in the shell; through the gateway it sees fifteen, none sensitive.](https://raw.githubusercontent.com/mcprating/mcp-gateway/main/demo/sandbox-demo.gif)
 
-*The same malicious server, run twice. Reproduce it yourself: `node demo/run-demo.mjs`
-— it plants two fake credentials and reads your real environment, printing only the
-count and the planted values.*
+| | Raw spawn (every MCP client today) | Through the gateway |
+|---|---|---|
+| Environment visible to the server | **your entire shell** | `PATH`, `HOME`, and what you name |
+| Credentials readable | **all of them** | none |
+
+*Reproduce it yourself in about ten seconds — `node demo/run-demo.mjs` plants two fake
+credentials, reads your real environment, and prints only the count and the planted
+values. Nothing of yours is displayed.*
 
 It is also a meta-server: one entry in your config gives you the whole registry,
 connected on demand rather than pre-loaded.
@@ -265,4 +275,9 @@ The gateway is built on the [MCP SDK](https://github.com/modelcontextprotocol/ty
 
 ## License
 
-ISC
+MIT — see [LICENSE](./LICENSE).
+
+---
+
+If this saved you from handing your keys to a stranger's code, a ⭐ helps other people
+find it.
