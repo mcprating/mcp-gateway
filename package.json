@@ -2,7 +2,7 @@
   "name": "@mcp-rating/gateway",
   "version": "0.2.2",
   "mcpName": "io.mcprating/gateway",
-  "description": "MCP Gateway — auto-discover, connect, and proxy MCP servers from any AI desktop client",
+  "description": "Run MCP servers without handing them your API keys — sandboxed execution plus on-demand discovery from a 59k-server registry.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
