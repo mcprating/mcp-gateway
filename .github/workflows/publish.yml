@@ -15,7 +15,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          # Node 24 for the npm it ships (11.x). This package deliberately does
+          # not commit a lockfile, so `npm install` re-resolves the whole tree on
+          # every release — and npm 10, which Node 22 bundles, now crashes doing
+          # it: "Cannot read properties of null (reading 'edgesOut')", an
+          # arborist bug tripped by something published after 0.2.2 went out.
+          # The v0.2.3 tag failed twice on this before the runner was moved up.
+          # Consumers are unaffected: `engines` still allows >=18, this is only
+          # the machine that builds and publishes.
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
       - run: npm install
