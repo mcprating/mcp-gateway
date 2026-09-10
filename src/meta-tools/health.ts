@@ -2,8 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ConnectionManager } from "../connection/connection-manager.js";
 import type { RegistryClient } from "../registry/registry-client.js";
 import { TRUST_LABELS } from "../permissions/trust-tiers.js";
-
-const GATEWAY_VERSION = "0.1.0";
+import { GATEWAY_VERSION } from "../version.js";
 
 export function registerHealth(
   server: McpServer,

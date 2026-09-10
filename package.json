@@ -1,6 +1,6 @@
 {
   "name": "@mcp-rating/gateway",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "mcpName": "io.mcprating/gateway",
   "description": "Run MCP servers without handing them your API keys — sandboxed execution plus on-demand discovery from a public MCP registry.",
   "type": "module",
@@ -56,7 +56,7 @@
     "tools"
   ],
   "license": "MIT",
-  "author": "[YOUR FULL NAME]",
+  "author": "saikousoshite-ai <saikou.soshite@gmail.com>",
   "engines": {
     "node": ">=18.0.0"
   },

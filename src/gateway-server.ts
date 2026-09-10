@@ -18,26 +18,7 @@ import { AuditLog } from "./audit/audit-log.js";
 import { primeProxyHandlers } from "./proxy/prime-handlers.js";
 import { setLogLevel } from "./utils/logger.js";
 import { dirname, join } from "node:path";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-/**
- * Read from package.json rather than hardcoding. The literal that used to live
- * here said "0.2.0" through both the 0.2.1 and 0.2.2 releases, so every client
- * that called initialize was told the wrong version — a number nobody thinks to
- * re-check, and one that matters when a user reports a bug against it.
- *
- * Resolves to the package root from either dist/ or src/, so tsx and the built
- * output agree.
- */
-const GATEWAY_VERSION: string = (() => {
-  try {
-    const here = dirname(fileURLToPath(import.meta.url));
-    return JSON.parse(readFileSync(join(here, "..", "package.json"), "utf-8")).version;
-  } catch {
-    return "0.0.0-unknown";
-  }
-})();
+import { GATEWAY_VERSION } from "./version.js";
 
 export interface GatewayContext {
   mcpServer: McpServer;
