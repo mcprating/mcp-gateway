@@ -14,3 +14,7 @@ package-lock.json
 
 # MCP Registry DNS auth private key — never commit
 key.pem
+
+# Scratch state the Shorts recording scripts write next to themselves on every
+# run (connection permissions, config, profiles). Regenerated each take.
+demo/shorts/.short-*.json

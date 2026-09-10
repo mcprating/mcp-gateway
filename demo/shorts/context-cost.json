@@ -1,0 +1,461 @@
+{
+  "measuredAt": "2026-09-09",
+  "scanned": 300,
+  "servers": [
+    {
+      "slug": "wuying-agentbay-mcp-server",
+      "tools": 1,
+      "tokens": 38
+    },
+    {
+      "slug": "kimi-mcp",
+      "tools": 1,
+      "tokens": 107
+    },
+    {
+      "slug": "nx-mcp",
+      "tools": 1,
+      "tokens": 149
+    },
+    {
+      "slug": "odgrim-mcp-datetime",
+      "tools": 4,
+      "tokens": 181
+    },
+    {
+      "slug": "coinbase-cds-mcp-server",
+      "tools": 2,
+      "tokens": 207
+    },
+    {
+      "slug": "fluttersdk-mcp",
+      "tools": 1,
+      "tokens": 231
+    },
+    {
+      "slug": "datamancy",
+      "tools": 2,
+      "tokens": 241
+    },
+    {
+      "slug": "transcend-io-mcp-server-docs",
+      "tools": 2,
+      "tokens": 286
+    },
+    {
+      "slug": "talkspresso-mcp-server",
+      "tools": 3,
+      "tokens": 291
+    },
+    {
+      "slug": "tokenizin-mcp-npx-fetch",
+      "tools": 4,
+      "tokens": 306
+    },
+    {
+      "slug": "mantine-mcp-server",
+      "tools": 4,
+      "tokens": 307
+    },
+    {
+      "slug": "cap-js-mcp-server",
+      "tools": 2,
+      "tokens": 326
+    },
+    {
+      "slug": "sylphlab-pdf-reader-mcp",
+      "tools": 1,
+      "tokens": 333
+    },
+    {
+      "slug": "flightradar-mcp-server",
+      "tools": 3,
+      "tokens": 395
+    },
+    {
+      "slug": "ericthered926-duckduckgo-mcp-server",
+      "tools": 2,
+      "tokens": 453
+    },
+    {
+      "slug": "mcp-postgres-server",
+      "tools": 6,
+      "tokens": 465
+    },
+    {
+      "slug": "linqapp-sdk-mcp",
+      "tools": 2,
+      "tokens": 511
+    },
+    {
+      "slug": "geobio-mcp-open-library",
+      "tools": 6,
+      "tokens": 511
+    },
+    {
+      "slug": "platformos-platformos-mcp-supervisor",
+      "tools": 1,
+      "tokens": 665
+    },
+    {
+      "slug": "mcp-image",
+      "tools": 1,
+      "tokens": 682
+    },
+    {
+      "slug": "siemens-ix-mcp-angular",
+      "tools": 2,
+      "tokens": 748
+    },
+    {
+      "slug": "primeng-mcp",
+      "tools": 8,
+      "tokens": 822
+    },
+    {
+      "slug": "snokam-mcp-salesforce",
+      "tools": 9,
+      "tokens": 893
+    },
+    {
+      "slug": "seed-design-docs-mcp",
+      "tools": 8,
+      "tokens": 1029
+    },
+    {
+      "slug": "modelcontextprotocol-server-memory",
+      "tools": 9,
+      "tokens": 1040
+    },
+    {
+      "slug": "vivantel-virage-agent-claude",
+      "tools": 7,
+      "tokens": 1090
+    },
+    {
+      "slug": "metmuseum-mcp",
+      "tools": 4,
+      "tokens": 1095
+    },
+    {
+      "slug": "upstash-context7-mcp",
+      "tools": 2,
+      "tokens": 1147
+    },
+    {
+      "slug": "vibe-mcp",
+      "tools": 9,
+      "tokens": 1219
+    },
+    {
+      "slug": "reddit-mcp-buddy",
+      "tools": 5,
+      "tokens": 1231
+    },
+    {
+      "slug": "elitedcs-ghl-mcp",
+      "tools": 5,
+      "tokens": 1296
+    },
+    {
+      "slug": "ssh-mcp",
+      "tools": 11,
+      "tokens": 1311
+    },
+    {
+      "slug": "lousy-agents-mcp",
+      "tools": 10,
+      "tokens": 1371
+    },
+    {
+      "slug": "multi-cloud-docs-search",
+      "tools": 6,
+      "tokens": 1628
+    },
+    {
+      "slug": "aifinpay-mcp",
+      "tools": 7,
+      "tokens": 1677
+    },
+    {
+      "slug": "adobe-commerce-commerce-extensibility-tools",
+      "tools": 11,
+      "tokens": 1843
+    },
+    {
+      "slug": "sylphx-pdf-reader-mcp",
+      "tools": 3,
+      "tokens": 1864
+    },
+    {
+      "slug": "modelcontextprotocol-server-filesystem",
+      "tools": 14,
+      "tokens": 1997
+    },
+    {
+      "slug": "ui5-mcp-server",
+      "tools": 10,
+      "tokens": 2419
+    },
+    {
+      "slug": "aikidosec-mcp",
+      "tools": 5,
+      "tokens": 2421
+    },
+    {
+      "slug": "zoulabo-line-hive",
+      "tools": 7,
+      "tokens": 2422
+    },
+    {
+      "slug": "grasp-mcp",
+      "tools": 10,
+      "tokens": 2445
+    },
+    {
+      "slug": "cyanheads-pubmed-mcp-server",
+      "tools": 9,
+      "tokens": 2470
+    },
+    {
+      "slug": "mcp-trends-hub",
+      "tools": 21,
+      "tokens": 2471
+    },
+    {
+      "slug": "webclaw-mcp",
+      "tools": 21,
+      "tokens": 2494
+    },
+    {
+      "slug": "mcp-testrail",
+      "tools": 35,
+      "tokens": 2587
+    },
+    {
+      "slug": "godxjp-ui-mcp",
+      "tools": 25,
+      "tokens": 2627
+    },
+    {
+      "slug": "mcp-firebird",
+      "tools": 27,
+      "tokens": 2730
+    },
+    {
+      "slug": "sfcc-dev-mcp",
+      "tools": 18,
+      "tokens": 2766
+    },
+    {
+      "slug": "trazum-mcp",
+      "tools": 7,
+      "tokens": 2806
+    },
+    {
+      "slug": "clinicaltrialsgov-mcp-server",
+      "tools": 7,
+      "tokens": 3109
+    },
+    {
+      "slug": "rebasepro-mcp",
+      "tools": 42,
+      "tokens": 3235
+    },
+    {
+      "slug": "manudota-artist-mcp",
+      "tools": 14,
+      "tokens": 4216
+    },
+    {
+      "slug": "claude-in-mobile",
+      "tools": 15,
+      "tokens": 4438
+    },
+    {
+      "slug": "roxybrowser-openapi",
+      "tools": 23,
+      "tokens": 4550
+    },
+    {
+      "slug": "omnifocus-mcp",
+      "tools": 12,
+      "tokens": 4747
+    },
+    {
+      "slug": "sap-ux-fiori-mcp-server",
+      "tools": 9,
+      "tokens": 4932
+    },
+    {
+      "slug": "debugmcp-mcp-debugger",
+      "tools": 28,
+      "tokens": 5134
+    },
+    {
+      "slug": "dfm-fi-agent",
+      "tools": 24,
+      "tokens": 5217
+    },
+    {
+      "slug": "orchyn-mcp",
+      "tools": 28,
+      "tokens": 5402
+    },
+    {
+      "slug": "nexus-flow-mcp",
+      "tools": 25,
+      "tokens": 5515
+    },
+    {
+      "slug": "chrome-devtools-mcp",
+      "tools": 29,
+      "tokens": 5734
+    },
+    {
+      "slug": "lcv-ideas-software-cross-review-v1",
+      "tools": 11,
+      "tokens": 6253
+    },
+    {
+      "slug": "salesforce-b2c-dx-mcp",
+      "tools": 33,
+      "tokens": 6562
+    },
+    {
+      "slug": "henkey-postgres-mcp-server",
+      "tools": 18,
+      "tokens": 6937
+    },
+    {
+      "slug": "shiplightai-mcp",
+      "tools": 12,
+      "tokens": 7158
+    },
+    {
+      "slug": "sigrank",
+      "tools": 25,
+      "tokens": 7376
+    },
+    {
+      "slug": "cachly-dev-mcp-server",
+      "tools": 27,
+      "tokens": 8055
+    },
+    {
+      "slug": "aaronsb-google-workspace-mcp",
+      "tools": 13,
+      "tokens": 9283
+    },
+    {
+      "slug": "codeblog-mcp",
+      "tools": 37,
+      "tokens": 9395
+    },
+    {
+      "slug": "mcp-ssh-manager",
+      "tools": 37,
+      "tokens": 9553
+    },
+    {
+      "slug": "bycrawl-mcp",
+      "tools": 99,
+      "tokens": 9860
+    },
+    {
+      "slug": "delega-dev-mcp",
+      "tools": 44,
+      "tokens": 10200
+    },
+    {
+      "slug": "taptap-maker",
+      "tools": 18,
+      "tokens": 14032
+    },
+    {
+      "slug": "antv-mcp-server-chart",
+      "tools": 27,
+      "tokens": 14367
+    },
+    {
+      "slug": "the-android-mcp",
+      "tools": 112,
+      "tokens": 17640
+    },
+    {
+      "slug": "notionhq-notion-mcp-server",
+      "tools": 24,
+      "tokens": 18667
+    },
+    {
+      "slug": "quackai-q402-mcp",
+      "tools": 47,
+      "tokens": 19065
+    },
+    {
+      "slug": "homespunapps-mcp",
+      "tools": 26,
+      "tokens": 19240
+    },
+    {
+      "slug": "calltelemetry-ct-lab-mcp",
+      "tools": 59,
+      "tokens": 20980
+    },
+    {
+      "slug": "microsoft-github-copilot-app-modernization-mcp-server",
+      "tools": 49,
+      "tokens": 22105
+    },
+    {
+      "slug": "clien-ai-mcp",
+      "tools": 30,
+      "tokens": 26607
+    },
+    {
+      "slug": "weppy-roblox-mcp",
+      "tools": 25,
+      "tokens": 27606
+    },
+    {
+      "slug": "cloudbase-cloudbase-mcp",
+      "tools": 38,
+      "tokens": 31759
+    },
+    {
+      "slug": "helix3-helix-mcp",
+      "tools": 90,
+      "tokens": 34540
+    },
+    {
+      "slug": "figma-console-mcp",
+      "tools": 121,
+      "tokens": 38985
+    },
+    {
+      "slug": "run402-mcp",
+      "tools": 213,
+      "tokens": 47914
+    },
+    {
+      "slug": "hostinger-api-mcp",
+      "tools": 375,
+      "tokens": 65174
+    },
+    {
+      "slug": "lottiefiles-creator-mcp",
+      "tools": 108,
+      "tokens": 69564
+    },
+    {
+      "slug": "sellable-mcp",
+      "tools": 198,
+      "tokens": 75405
+    },
+    {
+      "slug": "novalux12-spotify-mcp",
+      "tools": 608,
+      "tokens": 135666
+    }
+  ]
+}

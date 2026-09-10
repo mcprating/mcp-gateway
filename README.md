@@ -42,18 +42,31 @@ fixed cost and loads a server's tools only once you connect to it.
 
 | | measured |
 |---|--:|
-| Mean per real MCP server | **~1,500 tokens** |
-| 10 servers configured statically | **~15,100 tokens, every turn** |
-| Gateway, flat | **~2,800 tokens** |
+| Median real MCP server | **2,587 tokens** |
+| 10 servers configured statically | **~25,900 tokens, every turn** |
+| Gateway, flat | **2,644 tokens** |
 
-Roughly **5× less** standing overhead at ten servers, and the gap widens with
-each one you add.
+Roughly **10× less** standing overhead at ten servers, and the gap widens with
+each one you add. One median server already costs about what the entire gateway
+costs.
 
-*Honest about the method:* measured from 6 servers this project connected to and
-introspected, sized as `chars / 4`. It is an estimate from a small sample, not a
-benchmark. And it is standing overhead only — connecting to a server pays that
-server's schema cost at connect time. The saving is real precisely because most
+*Honest about the method:* measured from the tool schemas of 91 servers this
+project has connected to and introspected — drawn from the 300 most-downloaded
+in the registry — summing `{name, description, inputSchema}` per tool, the
+payload a client actually receives from `tools/list`, sized as `chars / 4`. That
+is an estimate, not a tokenizer.
+
+**Median, not mean, and the distribution is why.** The mean is 9,965 tokens,
+dragged there by a long tail: 19 of the 91 cost over 10,000 tokens and the
+heaviest — a Spotify server exposing 608 tools — costs 135,666, about 68% of a
+200k context window on its own. Quoting the mean would flatter this project's
+numbers using servers almost nobody installs.
+
+It is standing overhead only: connecting to a server still pays that server's
+schema cost at connect time. The saving is real precisely because most
 configured servers sit unused in most conversations.
+
+Reproduce it: `node demo/shorts/short2-context.mjs --refresh`.
 
 ## How It Works
 
