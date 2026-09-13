@@ -19,7 +19,7 @@
  * this directory's README, timed to what appears on screen.
  */
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -63,10 +63,29 @@ const strip = (s) =>
     .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2B00}-\u{2BFF}]/gu, "")
     .replace(/\s+$/, "");
 
-console.log(`running ${script} at authored pace to capture timings…`);
+/**
+ * Slower than the terminal default, because narration sets the pace.
+ *
+ * _frame.mjs holds each beat 1400ms, which is right for watching output scroll
+ * past. It is wrong for video: the synthesised voice reads about 2.2 words a
+ * second, so an 11s render left every narration segment talking over the next
+ * one. ~4200ms lands each Short near 30s, which is both the format's sweet spot
+ * and roughly the 45-50 words of voiceover it can carry.
+ */
+let PACE = process.env.DEMO_PACE_MS;
+if (!PACE) {
+  try {
+    const n = JSON.parse(readFileSync(join(__dirname, "narration.json"), "utf8"));
+    PACE = String(n[script]?.pace ?? 4200);
+  } catch {
+    PACE = "4200";
+  }
+}
+
+console.log(`running ${script} at ${PACE}ms/beat to capture timings…`);
 const child = spawn(process.execPath, [join(__dirname, `${script}.mjs`)], {
   cwd: join(__dirname, "..", ".."),
-  env: { ...process.env },
+  env: { ...process.env, DEMO_PACE_MS: PACE },
 });
 
 const lines = [];

@@ -1,0 +1,121 @@
+{
+  "_comment": [
+    "Voiceover for each Short. `at` is seconds into the rendered video; aim a line",
+    "to land just after the thing it describes appears, never before.",
+    "",
+    "WORD BUDGET. The Windows voice reads at ~2.2 words/sec, so a 30s Short affords",
+    "about 45-50 words TOTAL once you leave room to breathe. The first draft of this",
+    "file ran to 91 words over an 11s video and every segment talked over the next.",
+    "narrate.mjs warns when they collide — believe it, and cut words rather than",
+    "moving cues.",
+    "",
+    "Numbers are spelled out: a synthesiser reads '2,587' as 'two comma five eight",
+    "seven', and 'API' as a word rather than letters.",
+    "",
+    "`pace` is ms per beat for render-video.mjs. It is here rather than in the renderer because video length and narration length have to agree: too fast and lines talk over each other, too slow and the Short ends in silence. Each value below puts the last word about three seconds before the final frame."
+  ],
+  "short0-problem": {
+    "pace": 4350,
+    "segments": [
+      {
+        "at": 1.0,
+        "text": "You just added an M C P server."
+      },
+      {
+        "at": 5.0,
+        "text": "It reads every variable in your shell."
+      },
+      {
+        "at": 11.0,
+        "text": "It costs you tokens. Every single turn."
+      },
+      {
+        "at": 17.0,
+        "text": "We tried to start a hundred and eighty two. Sixty five answered."
+      },
+      {
+        "at": 24.0,
+        "text": "One in three works. All of them read your keys."
+      }
+    ]
+  },
+  "short1-secrets": {
+    "pace": 4200,
+    "segments": [
+      {
+        "at": 0.5,
+        "text": "Every M C P server you install can read your whole shell."
+      },
+      {
+        "at": 6.5,
+        "text": "This one is malicious. Watch what it takes."
+      },
+      {
+        "at": 12.0,
+        "text": "Five credentials. It asked for nothing."
+      },
+      {
+        "at": 17.0,
+        "text": "Same server, through the gateway. Nothing sensitive."
+      },
+      {
+        "at": 23.0,
+        "text": "Same shell. One of them got your keys."
+      },
+      {
+        "at": 27.5,
+        "text": "Free and open source. Link below."
+      }
+    ]
+  },
+  "short2-context": {
+    "pace": 2500,
+    "segments": [
+      {
+        "at": 0.5,
+        "text": "Where does your context window actually go?"
+      },
+      {
+        "at": 5.5,
+        "text": "Every server injects its whole schema. Every turn."
+      },
+      {
+        "at": 11.5,
+        "text": "I measured ninety one of them. The median costs two and a half thousand tokens."
+      },
+      {
+        "at": 19.0,
+        "text": "Ten servers is twenty six thousand, before you type."
+      },
+      {
+        "at": 25.0,
+        "text": "The gateway is flat. Two thousand six hundred."
+      }
+    ]
+  },
+  "short3-discover": {
+    "pace": 3100,
+    "segments": [
+      {
+        "at": 0.5,
+        "text": "Stop pasting J SON into your M C P config."
+      },
+      {
+        "at": 5.5,
+        "text": "One entry replaces all of them."
+      },
+      {
+        "at": 10.5,
+        "text": "Then just ask. Two hundred Postgres servers, ranked by quality."
+      },
+      {
+        "at": 17.0,
+        "text": "Connect one. Its tools are live."
+      },
+      {
+        "at": 22.0,
+        "text": "You pay that wait once. Not at every launch."
+      }
+    ]
+  }
+}

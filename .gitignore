@@ -22,3 +22,5 @@ demo/shorts/.short-*.json
 # Rendered Shorts — regenerate with demo/shorts/render-video.mjs
 demo/shorts/*.mp4
 demo/shorts/.render-tmp/
+demo/shorts/*-narrated.mp4
+demo/shorts/.narrate-tmp/
