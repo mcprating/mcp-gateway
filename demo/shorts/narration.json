@@ -12,30 +12,36 @@
     "Numbers are spelled out: a synthesiser reads '2,587' as 'two comma five eight",
     "seven', and 'API' as a word rather than letters.",
     "",
-    "`pace` is ms per beat for render-video.mjs. It is here rather than in the renderer because video length and narration length have to agree: too fast and lines talk over each other, too slow and the Short ends in silence. Each value below puts the last word about three seconds before the final frame."
+    "`pace` is ms per beat for render-video.mjs. It is here rather than in the renderer because video length and narration length have to agree: too fast and lines talk over each other, too slow and the Short ends in silence. Each value below puts the last word about three seconds before the final frame.",
+    "`display` is the caption text. It differs from `text` on purpose: the synthesiser needs 'M C P' and numbers spelled out, a caption should read as written. narrate.mjs writes an .srt from these and falls back to `text` when absent."
   ],
   "short0-problem": {
     "pace": 4350,
     "segments": [
       {
         "at": 1.0,
-        "text": "You just added an M C P server."
+        "text": "You just added an M C P server.",
+        "display": "You just added an MCP server."
       },
       {
         "at": 5.0,
-        "text": "It reads every variable in your shell."
+        "text": "It reads every variable in your shell.",
+        "display": "It reads every variable in your shell."
       },
       {
         "at": 11.0,
-        "text": "It costs you tokens. Every single turn."
+        "text": "It costs you tokens. Every single turn.",
+        "display": "It costs you tokens. Every single turn."
       },
       {
         "at": 17.0,
-        "text": "We tried to start a hundred and eighty two. Sixty five answered."
+        "text": "We tried to start a hundred and eighty two. Sixty five answered.",
+        "display": "We tried to start 182 of them. 65 answered."
       },
       {
         "at": 24.0,
-        "text": "One in three works. All of them read your keys."
+        "text": "One in three works. All of them read your keys.",
+        "display": "One in three works. All of them read your keys."
       }
     ]
   },
@@ -44,27 +50,33 @@
     "segments": [
       {
         "at": 0.5,
-        "text": "Every M C P server you install can read your whole shell."
+        "text": "Every M C P server you install can read your whole shell.",
+        "display": "Every MCP server you install can read your whole shell."
       },
       {
         "at": 6.5,
-        "text": "This one is malicious. Watch what it takes."
+        "text": "This one is malicious. Watch what it takes.",
+        "display": "This one is malicious. Watch what it takes."
       },
       {
         "at": 12.0,
-        "text": "Five credentials. It asked for nothing."
+        "text": "Five credentials. It asked for nothing.",
+        "display": "Five credentials. It asked for nothing."
       },
       {
         "at": 17.0,
-        "text": "Same server, through the gateway. Nothing sensitive."
+        "text": "Same server, through the gateway. Nothing sensitive.",
+        "display": "Same server, through the gateway. Nothing sensitive."
       },
       {
         "at": 23.0,
-        "text": "Same shell. One of them got your keys."
+        "text": "Same shell. One of them got your keys.",
+        "display": "Same shell. One of them got your keys."
       },
       {
         "at": 27.5,
-        "text": "Free and open source. Link below."
+        "text": "Free and open source. Link below.",
+        "display": "Free and open source. Link below."
       }
     ]
   },
@@ -73,23 +85,28 @@
     "segments": [
       {
         "at": 0.5,
-        "text": "Where does your context window actually go?"
+        "text": "Where does your context window actually go?",
+        "display": "Where does your context window actually go?"
       },
       {
         "at": 5.5,
-        "text": "Every server injects its whole schema. Every turn."
+        "text": "Every server injects its whole schema. Every turn.",
+        "display": "Every server injects its whole schema. Every turn."
       },
       {
         "at": 11.5,
-        "text": "I measured ninety one of them. The median costs two and a half thousand tokens."
+        "text": "I measured ninety one of them. The median costs two and a half thousand tokens.",
+        "display": "I measured 91 of them. The median costs ~2,587 tokens."
       },
       {
         "at": 19.0,
-        "text": "Ten servers is twenty six thousand, before you type."
+        "text": "Ten servers is twenty six thousand, before you type.",
+        "display": "Ten servers is 26,000 — before you type."
       },
       {
         "at": 25.0,
-        "text": "The gateway is flat. Two thousand six hundred."
+        "text": "The gateway is flat. Two thousand six hundred.",
+        "display": "The gateway is flat. 2,644 tokens."
       }
     ]
   },
@@ -98,23 +115,28 @@
     "segments": [
       {
         "at": 0.5,
-        "text": "Stop pasting J SON into your M C P config."
+        "text": "Stop pasting J SON into your M C P config.",
+        "display": "Stop pasting JSON into your MCP config."
       },
       {
         "at": 5.5,
-        "text": "One entry replaces all of them."
+        "text": "One entry replaces all of them.",
+        "display": "One entry replaces all of them."
       },
       {
         "at": 10.5,
-        "text": "Then just ask. Two hundred Postgres servers, ranked by quality."
+        "text": "Then just ask. Two hundred Postgres servers, ranked by quality.",
+        "display": "Then just ask. ~200 Postgres servers, ranked by quality."
       },
       {
         "at": 17.0,
-        "text": "Connect one. Its tools are live."
+        "text": "Connect one. Its tools are live.",
+        "display": "Connect one. Its tools are live."
       },
       {
         "at": 22.0,
-        "text": "You pay that wait once. Not at every launch."
+        "text": "You pay that wait once. Not at every launch.",
+        "display": "You pay that wait once. Not at every launch."
       }
     ]
   }

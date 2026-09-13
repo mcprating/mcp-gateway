@@ -159,6 +159,31 @@ await new Promise((res, rej) => {
   ff.on("close", (c) => (c === 0 ? res() : rej(new Error(`ffmpeg exited ${c}`))));
 });
 
+// ── Captions ─────────────────────────────────────────────────────────────────
+//
+// Most Shorts are watched muted, so for a narrated video the captions are not an
+// accessibility afterthought — they are how the majority of viewers receive it.
+// Generating them here beats YouTube's auto-captions because we know the exact
+// cue times, and because `display` says how a line should READ rather than how
+// it had to be spelled to make the synthesiser pronounce it: "M C P" is spoken,
+// "MCP" is written.
+const srtTime = (s) => {
+  const ms = Math.round(s * 1000);
+  const h = String(Math.floor(ms / 3600000)).padStart(2, "0");
+  const m = String(Math.floor((ms % 3600000) / 60000)).padStart(2, "0");
+  const sec = String(Math.floor((ms % 60000) / 1000)).padStart(2, "0");
+  return `${h}:${m}:${sec},${String(ms % 1000).padStart(3, "0")}`;
+};
+const srt = wavs
+  .map((w, i) => {
+    const end = Math.min(w.at + w.len, duration);
+    return `${i + 1}\n${srtTime(w.at)} --> ${srtTime(end)}\n${w.display || w.text}\n`;
+  })
+  .join("\n");
+const srtPath = join(__dirname, `${name}.srt`);
+writeFileSync(srtPath, srt, "utf8");
+
 rmSync(tmp, { recursive: true, force: true });
 console.log(`\nwrote ${out}`);
+console.log(`wrote ${srtPath} — upload as subtitles rather than relying on auto-captions`);
 if (!MUSIC) console.log("No music bed. Add one with --music <file> (Suno export works).");
