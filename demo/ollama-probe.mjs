@@ -63,9 +63,10 @@ const API =
   process.env.API || (/\/v1\/?$/.test(OLLAMA) ? "openai" : "ollama");
 
 const TASK =
+  process.env.TASK ||
   "Find an MCP server that can search the web, then connect to it. " +
-  "Use the tools available to you. When you have connected, say DONE and " +
-  "name the server you connected to.";
+    "Use the tools available to you. When you have connected, say DONE and " +
+    "name the server you connected to.";
 
 const log = (...a) => console.log(...a);
 
@@ -123,17 +124,36 @@ const transport = new StdioClientTransport({
 });
 const mcp = new Client({ name: "ollama-probe", version: "1.0.0" });
 await mcp.connect(transport);
-const { tools } = await mcp.listTools();
+let { tools } = await mcp.listTools();
+const baseToolNames = new Set(tools.map((t) => t.name));
 
-/** MCP tool schema -> the OpenAI-style shape Ollama expects. */
-const ollamaTools = tools.map((t) => ({
-  type: "function",
-  function: {
-    name: t.name,
-    description: t.description,
-    parameters: t.inputSchema,
-  },
-}));
+/**
+ * Re-read the tool list after every turn.
+ *
+ * The gateway's whole point is that a server's tools appear only once you
+ * connect to it — it fires tools/list_changed and the host refreshes. An earlier
+ * version of this probe fetched the list once at startup, so the proxied tools
+ * never reached the model and the only way to touch a connected server was the
+ * mcp_call_tool meta-tool. That is not how a real client behaves, and it made
+ * "can a model use a server it just connected to?" untestable by construction.
+ */
+async function refreshTools() {
+  const next = (await mcp.listTools()).tools;
+  const added = next.filter((t) => !tools.some((o) => o.name === t.name));
+  tools = next;
+  return added;
+}
+
+/** MCP tool schemas -> the OpenAI-style shape both APIs expect. */
+const asOllamaTools = () =>
+  tools.map((t) => ({
+    type: "function",
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.inputSchema,
+    },
+  }));
 
 const schemaChars = JSON.stringify(
   tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
@@ -161,7 +181,7 @@ for (; turn < MAX_TURNS && !done; turn++) {
       ? {
           model: MODEL,
           messages,
-          tools: ollamaTools,
+          tools: asOllamaTools(),
           stream: false,
           temperature: 0,
           max_tokens: MAX_GEN,
@@ -169,7 +189,7 @@ for (; turn < MAX_TURNS && !done; turn++) {
       : {
           model: MODEL,
           messages,
-          tools: ollamaTools,
+          tools: asOllamaTools(),
           stream: false,
           options: { num_ctx: NUM_CTX, temperature: 0, num_predict: MAX_GEN },
         },
@@ -246,6 +266,13 @@ for (; turn < MAX_TURNS && !done; turn++) {
     );
   }
 
+  // A connect makes that server's tools available; pick them up like a real
+  // client would, so the model can actually call them on the next turn.
+  const added = await refreshTools();
+  if (added.length) {
+    log(`           ++ ${added.length} new tool(s) now callable: ${added.slice(0, 4).map((t) => t.name).join(", ")}`);
+  }
+
   if (runaway) break;
 }
 
@@ -272,7 +299,20 @@ try {
 const attemptedConnect = calls.includes("mcp_connect");
 const connected = liveConnections.length > 0;
 const discovered = calls.includes("mcp_discover");
-const invented = calls.filter((c) => !tools.some((t) => t.name === c));
+
+/**
+ * Did it actually USE a server, or just reach one?
+ *
+ * Either route counts: calling a proxied tool that appeared after connecting
+ * (a name outside the 13 the gateway starts with), or going through the
+ * mcp_call_tool meta-tool. Connecting and stopping is the weaker result, and
+ * conflating the two would overstate what the gateway has been shown to do.
+ */
+const proxiedCalls = calls.filter((c) => !baseToolNames.has(c));
+const usedATool = proxiedCalls.length > 0 || calls.includes("mcp_call_tool");
+// `tools` is the CURRENT list, so proxied tools that appeared after a connect
+// are legitimate. Only a name that never existed at any point is invented.
+const invented = calls.filter((c) => !tools.some((t) => t.name === c) && !baseToolNames.has(c));
 
 /**
  * Reaching mcp_connect is not success, and reporting it as success is how the
@@ -291,9 +331,11 @@ const invented = calls.filter((c) => !tools.some((t) => t.name === c));
 const droveWell = !runaway && discovered && attemptedConnect && done && invented.length === 0;
 const verdict = runaway
   ? "RUNAWAY — model could not stop"
-  : droveWell && connected
-    ? "ORCHESTRATED — drove the protocol and connected"
-    : droveWell
+  : droveWell && connected && usedATool
+    ? "FULL LOOP — discovered, connected, and used a tool"
+    : droveWell && connected
+      ? "CONNECTED ONLY — reached a server but never called a tool on it"
+      : droveWell
       ? "MODEL OK, TASK FAILED — correct protocol, no server would start"
       : discovered || attemptedConnect
         ? "PARTIAL — started the flow, did not finish cleanly"
@@ -323,6 +365,7 @@ log(`discovered:      ${discovered ? "yes" : "no"}`);
 log(`connect tried:   ${attemptedConnect ? "yes" : "no"}`);
 log(`actually live:   ${connected ? liveConnections.join(", ") : "nothing connected"}`);
 log(`terminated:      ${done ? "yes" : "NO — never produced a final answer"}`);
+log(`used a tool:     ${usedATool ? (proxiedCalls.length ? proxiedCalls.join(", ") : "via mcp_call_tool") : "no"}`);
 log(`prompt tokens:   ${promptTokens ?? "?"} (real tokenizer, first turn)`);
 if (promptTokens) {
   const est = Math.round(schemaChars / 4);
