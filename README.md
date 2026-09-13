@@ -50,6 +50,38 @@ Roughly **10× less** standing overhead at ten servers, and the gap widens with
 each one you add. One median server already costs about what the entire gateway
 costs.
 
+### But standing overhead is not the bill — here is the break-even
+
+That 10× is what *sits* in the window. It is not what a conversation costs,
+because the gateway also adds turns: it has to discover a server and connect to
+it before using it, every turn re-sends the whole transcript, and `mcp_discover`
+output stays in that transcript afterwards.
+
+Measured end to end on gemma-4-31B through vLLM, with the server's own tokenizer
+rather than an estimate:
+
+| | tokens | turns |
+|---|--:|--:|
+| Gateway, cold — discover, connect, then call a tool | **17,904** | 5 |
+| Same tool call, server already configured | **6,605** | 2 |
+
+**With one server, the gateway costs 2.7× more than just configuring it.** The
+saving only appears once you have enough servers that carrying all their schemas
+outweighs the setup. N configured, one actually used, after ten turns of work:
+
+| servers | static | gateway | |
+|--:|--:|--:|---|
+| 1 | 25,870 | 70,524 | static wins 2.7× |
+| 2 | 51,740 | 70,524 | static wins 1.4× |
+| **4** | 103,480 | 70,524 | gateway wins 1.5× |
+| 10 | 258,700 | 70,524 | gateway wins 3.7× |
+| 20 | 517,400 | 70,524 | gateway wins 7.3× |
+
+**Break-even is three to five servers.** Below that, a hand-written config is
+genuinely cheaper and you should use one. Above it the gateway wins, and keeps
+winning as you add more — but the honest figure at ten servers is about **3×**
+on total tokens, not the 10× you get by counting standing overhead alone.
+
 *Honest about the method:* measured from the tool schemas of 91 servers this
 project has connected to and introspected — drawn from the 300 most-downloaded
 in the registry — summing `{name, description, inputSchema}` per tool, the
@@ -62,11 +94,22 @@ heaviest — a Spotify server exposing 608 tools — costs 135,666, about 68% of
 200k context window on its own. Quoting the mean would flatter this project's
 numbers using servers almost nobody installs.
 
-It is standing overhead only: connecting to a server still pays that server's
-schema cost at connect time. The saving is real precisely because most
-configured servers sit unused in most conversations.
+The saving is real precisely because most configured servers sit unused in most
+conversations — but see the break-even above before assuming it applies to you.
 
-Reproduce it: `node demo/shorts/short2-context.mjs --refresh`.
+The `chars / 4` estimate was checked against three real tokenizers and came in at
+0.88×, 0.98× and 1.01× of the true count, so it never reads low.
+
+Reproduce both: `node demo/shorts/short2-context.mjs --refresh` for the schema
+corpus, and `demo/ollama-probe.mjs` for the end-to-end bill —
+
+```bash
+# gateway cold: must discover and connect first
+OLLAMA_HOST=http://host:8000/v1 node demo/ollama-probe.mjs your-model
+
+# baseline: server already attached, like a static config
+PRECONNECT=everything-slim OLLAMA_HOST=... node demo/ollama-probe.mjs your-model
+```
 
 ## How It Works
 

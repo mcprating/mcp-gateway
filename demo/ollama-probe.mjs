@@ -128,6 +128,24 @@ let { tools } = await mcp.listTools();
 const baseToolNames = new Set(tools.map((t) => t.name));
 
 /**
+ * PRECONNECT=<slug> simulates a statically configured client.
+ *
+ * The comparison the gateway's pitch actually rests on is not "13 meta-tools vs
+ * N server schemas" — it is the whole conversation. Connecting up front puts a
+ * server's tools in the window from turn one, exactly as a hand-written
+ * mcpServers config would, so the same task can be run both ways and the bills
+ * compared. Without this the gateway only ever gets measured against itself.
+ */
+if (process.env.PRECONNECT) {
+  await mcp.callTool({
+    name: "mcp_connect",
+    arguments: { slug: process.env.PRECONNECT, confirmed: true },
+  });
+  tools = (await mcp.listTools()).tools;
+  log(`preconnected:  ${process.env.PRECONNECT} (simulating a static config)`);
+}
+
+/**
  * Re-read the tool list after every turn.
  *
  * The gateway's whole point is that a server's tools appear only once you
@@ -172,6 +190,7 @@ let promptTokens = null;
 let done = false;
 let turn = 0;
 let runaway = 0;
+const turnCosts = [];
 
 for (; turn < MAX_TURNS && !done; turn++) {
   const started = Date.now();
@@ -202,9 +221,15 @@ for (; turn < MAX_TURNS && !done; turn++) {
     break;
   }
   // First turn carries the whole tool schema, so this is the standing cost.
-  if (promptTokens === null) {
-    promptTokens = res.prompt_eval_count ?? res.usage?.prompt_tokens ?? null;
-  }
+  const pt = res.prompt_eval_count ?? res.usage?.prompt_tokens ?? null;
+  const ct = res.eval_count ?? res.usage?.completion_tokens ?? null;
+  if (promptTokens === null) promptTokens = pt;
+  // Per-turn accounting. Standing overhead is what the schema costs once; the
+  // bill is every turn's prompt re-read plus what the model wrote. The gateway
+  // trades schema for turns, and only the running total shows whether that is
+  // a saving — discovery output in particular stays in the transcript for the
+  // rest of the conversation.
+  turnCosts.push({ turn: turn + 1, prompt: pt ?? 0, completion: ct ?? 0 });
 
   const msg = (API === "openai" ? res.choices?.[0]?.message : res.message) || {};
   messages.push(msg);
@@ -328,7 +353,15 @@ const invented = calls.filter((c) => !tools.some((t) => t.name === c) && !baseTo
  * ecosystem result, not a model result, and the probe must not blame the model
  * for it.
  */
-const droveWell = !runaway && discovered && attemptedConnect && done && invented.length === 0;
+// With PRECONNECT the model is not asked to discover or connect — that is the
+// point of the baseline — so requiring those steps scored a run that called a
+// tool successfully as "never engaged the tools".
+const orchestrationExpected = !process.env.PRECONNECT;
+const droveWell =
+  !runaway &&
+  done &&
+  invented.length === 0 &&
+  (!orchestrationExpected || (discovered && attemptedConnect));
 const verdict = runaway
   ? "RUNAWAY — model could not stop"
   : droveWell && connected && usedATool
@@ -367,6 +400,11 @@ log(`actually live:   ${connected ? liveConnections.join(", ") : "nothing connec
 log(`terminated:      ${done ? "yes" : "NO — never produced a final answer"}`);
 log(`used a tool:     ${usedATool ? (proxiedCalls.length ? proxiedCalls.join(", ") : "via mcp_call_tool") : "no"}`);
 log(`prompt tokens:   ${promptTokens ?? "?"} (real tokenizer, first turn)`);
+if (turnCosts.length) {
+  const billed = turnCosts.reduce((a, t) => a + t.prompt + t.completion, 0);
+  log(`per-turn prompt: ${turnCosts.map((t) => t.prompt).join(" -> ")}`);
+  log(`TOTAL BILLED:    ${billed} tok across ${turnCosts.length} turn(s)`);
+}
 if (promptTokens) {
   const est = Math.round(schemaChars / 4);
   log(`chars/4 est:     ${est}  -> ratio ${(promptTokens / est).toFixed(2)}x`);
