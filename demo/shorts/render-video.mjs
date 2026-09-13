@@ -138,7 +138,11 @@ const filters = lines.map((l, i) => {
   writeFileSync(f, l.text, "utf8");
   const path = f.replace(/\\/g, "/").replace(/^([A-Za-z])\:/, "$1\\:");
   return (
-    `drawtext=fontfile='${FONT}':textfile='${path}':` +
+    // expansion=none is load-bearing. drawtext expands %{...} sequences by
+    // default, and a bare '%' in the text makes the whole line render as
+    // nothing — no error, no warning, just a gap. Short 2's "68% of the whole
+    // window" vanished this way and was only caught by looking at a frame.
+    `drawtext=fontfile='${FONT}':textfile='${path}':expansion=none:` +
     `fontcolor=${FG}:fontsize=${FONT_SIZE}:x=${MARGIN}:y=${l.y}:` +
     `enable='gte(t,${l.at.toFixed(2)})'`
   );

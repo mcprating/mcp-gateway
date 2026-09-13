@@ -166,7 +166,20 @@ console.log(ledger("standing cost", `${fmt(TEN)} tok`));
 await beat(0.8);
 console.log(ledger("through the gateway", `${fmt(gw.tokens)} tok`));
 await beat(1.2);
-console.log(`\n  ${Math.round(TEN / gw.tokens)}× less. Every single turn.`);
+// Says "sitting in the window", not a bare multiplier.
+//
+// This line used to read "10x less. Every single turn." — true of standing
+// overhead and false of what a conversation actually costs, because the gateway
+// also adds turns to discover and connect. Measured end to end the saving is
+// nearer 3x at ten servers, and below about four the gateway costs MORE than a
+// static config. Shipping the flattering number in a video while the README
+// carries the correction is how a project loses the right to be believed.
+console.log(`\n  ${Math.round(TEN / gw.tokens)}× less sitting in the window.`);
+await beat(0.9);
+// Written to fit 44 columns with the indent rather than passed through wrap(),
+// which broke these two lines mid-phrase and stranded single words.
+console.log("  But it adds turns. Real saving: ~3×.");
+console.log("  Under 4 servers, don't bother.");
 await beat(1.8);
 
 heading("And the heaviest one?");
@@ -186,8 +199,12 @@ console.log(
 await beat(1.8);
 
 console.log(`\n${rule("━")}`);
-console.log(wrap(`Measured ${snap.measuredAt} from public schemas.`));
-console.log(wrap("Sized as chars/4 — an estimate, not a tokenizer."));
+// One line, not two. "an estimate, not a tokenizer" was the honest caveat before
+// the estimate had been checked; it has since been run against three real
+// tokenizers at 0.88x, 0.98x and 1.01x, so the stronger and shorter statement is
+// that it was verified. Saving the line also keeps the closing URL on screen.
+console.log(wrap(`Measured ${snap.measuredAt}. chars/4, checked`));
+console.log(wrap("against 3 real tokenizers.", "  "));
 console.log("  github.com/mcprating/mcp-gateway");
 console.log(`${rule("━")}\n`);
 process.exit(0);

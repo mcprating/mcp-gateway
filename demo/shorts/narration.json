@@ -105,8 +105,8 @@
       },
       {
         "at": 25.0,
-        "text": "The gateway is flat. Two thousand six hundred.",
-        "display": "The gateway is flat. 2,644 tokens."
+        "text": "The gateway is flat. But it adds turns, so the real saving is about three times.",
+        "display": "The gateway is flat. Real saving: ~3×."
       }
     ]
   },
