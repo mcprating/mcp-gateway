@@ -139,5 +139,35 @@
         "display": "You pay that wait once. Not at every launch."
       }
     ]
+  },
+  "short4-dead-servers": {
+    "pace": 3000,
+    "segments": [
+      {
+        "at": 0.5,
+        "text": "I gave an A I sixty three thousand M C P servers.",
+        "display": "I gave an AI 63,000 MCP servers."
+      },
+      {
+        "at": 5.5,
+        "text": "One task. Find one that searches the web.",
+        "display": "One task. Find one that searches the web."
+      },
+      {
+        "at": 11.0,
+        "text": "It tried four. Every single one failed.",
+        "display": "It tried four. Every single one failed."
+      },
+      {
+        "at": 18.0,
+        "text": "So it gave up on the registry, and used something it already knew.",
+        "display": "So it gave up on the registry — and used something it already knew."
+      },
+      {
+        "at": 25.0,
+        "text": "The model did nothing wrong. It ran out of working servers.",
+        "display": "The model did nothing wrong. It ran out of working servers."
+      }
+    ]
   }
 }
