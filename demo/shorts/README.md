@@ -22,18 +22,48 @@ connect. Warming it is not cheating — the package genuinely stays cached after
 first install — but the video should not imply first-run is instant, and the
 script prints the real elapsed time either way.
 
-**Terminal:** 44 columns, dark background, a font with good box-drawing glyphs
-(Cascadia Code, JetBrains Mono). 44 columns is what `_frame.mjs` wraps to, and
-it is chosen so the frame stays legible on a phone. Wider and the text shrinks
-below readable.
+## You do not need a screen recorder
 
-**Capture:** record the terminal window, then crop to 9:16 (1080×1920). Do not
-record a maximised terminal and shrink it — the text ends up unreadable, which
-is the single most common way a dev-tool Short fails.
+```bash
+node demo/shorts/render-video.mjs short1-secrets
+```
+
+That writes `short1-secrets.mp4` at exactly 1080×1920, ready for CapCut. It runs
+the script at its authored pace, stamps each line as it is printed, and renders
+the whole thing with ffmpeg — so the `beat()` calls already written into the
+scripts become the video's timing, and nothing needs re-timing in an editor.
+
+Doing it this way rather than capturing a window means the framing is exact, the
+type is legible by construction rather than by luck, and when a measurement
+changes you re-run one command instead of re-recording and re-cropping a take.
+It also warns instead of silently clipping if the content grows past the frame —
+which it did, and which cost `short3` its closing call-to-action until the layout
+was fixed.
+
+Current output:
+
+| script | duration |
+|---|--:|
+| `short1-secrets` | 13.5s |
+| `short2-context` | 20.3s |
+| `short3-discover` | 15.7s |
+
+All three leave room for narration inside a 30–40s Short.
+
+**Emoji are dropped in the render.** Cascadia Mono has no colour emoji, so 💀 and
+🛡️ would come out as empty boxes. The words next to them carry the meaning; if
+you want the emoji, add them as text layers in CapCut where they will render
+properly.
+
+**If you would rather record the terminal anyway:** 44 columns, dark background,
+a font with real box-drawing glyphs. Windows Game Bar (Win+G) captures a window
+without installing anything. Crop to 9:16 afterwards — and never record a
+maximised terminal and shrink it, which is the single most common way a dev-tool
+Short ends up unreadable.
 
 **Pacing:** the scripts hold each beat by default (`DEMO_PACE_MS`, default
-1400ms). `DEMO_PACE_MS=0` runs instantly for checking output; leave it unset
-when recording.
+1400ms). `DEMO_PACE_MS=0` runs instantly for checking output; leave it unset for
+a render or a take.
 
 ---
 

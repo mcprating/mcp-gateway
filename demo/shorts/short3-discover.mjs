@@ -89,8 +89,12 @@ for (const t of tools.slice(0, 4)) console.log(`    ${t.name}`);
 await beat(1.8);
 
 console.log(`\n${rule("━")}`);
-console.log(wrap("That wait is paid once, when you ask for a server —"));
-console.log(wrap("not by every server, at every launch."));
+// Kept to two lines that each fit in 44 columns unwrapped: the first phrasing
+// broke as "…when you ask for a / server —", stranding one word on its own line,
+// and the extra row pushed the closing frame 6px past the bottom of a 1080x1920
+// render.
+console.log(wrap("Paid once, when you ask for a server."));
+console.log(wrap("Not by every server, at every launch."));
 console.log(rule("━"));
 console.log("  npx -y @mcp-rating/gateway");
 console.log("  github.com/mcprating/mcp-gateway");
