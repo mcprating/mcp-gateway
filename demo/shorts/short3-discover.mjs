@@ -21,15 +21,24 @@ import { beat, fmt, heading, ledger, rule, wrap } from "./_frame.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const API = "https://mcprating.io/api/v1";
-const QUERY = process.env.SHORT3_QUERY || "postgres";
-// No credentials, one tool, starts unattended — so a take never dies waiting on
-// an auth prompt. Swap via SHORT3_SLUG if this one ever stops publishing.
-const SLUG = process.env.SHORT3_SLUG || "oevortex-ddg-search";
+// The query must describe the server we go on to connect to. It was "postgres",
+// which listed three Postgres servers and then connected to a DuckDuckGo search
+// server — incoherent to anyone actually watching, and the kind of detail that
+// costs more credibility than the demo earns. "web search" was no better: sorted
+// by quality that returns Google Workspace servers.
+const QUERY = process.env.SHORT3_QUERY || "duckduckgo";
+// The TOP-RANKED result for that query, and it starts unattended with no
+// credentials — so the demo connects to the best server it just listed rather
+// than to some fourth one off screen. Swap via SHORT3_SLUG if it stops
+// publishing; check the replacement is still in the first three.
+const SLUG = process.env.SHORT3_SLUG || "zhafron-mcp-web-search";
 
 console.log(`\n${rule("━")}`);
 console.log("  ONE MCP SERVER, OR ALL OF THEM");
 console.log(rule("━"));
-console.log(wrap("Every server in your client config is spawned at launch and costs context every turn — used or not."));
+// Two lines, not three. Adding the cache caveat and a second tool to the connect
+// output pushed the closing URL 56px off the bottom of the frame.
+console.log(wrap("Every server in your config is spawned at launch, and costs context every turn."));
 await beat(1.6);
 
 heading("Replace the whole config with this");
@@ -84,6 +93,10 @@ const conn = ctx.connectionManager.getConnection(summary.slug);
 const { tools } = await conn.client.listTools();
 
 console.log(ledger("connected in", `${seconds}s`));
+// Say it is cached. On a warm npx cache this reads ~2s, and our own published
+// measurement puts the median server at 13.2s to a usable tool list. Showing
+// the fast number without the caveat would be contradicted by our own blog.
+console.log("     (npx cached — first run is slower)");
 console.log(ledger("tools now available", tools.length));
 for (const t of tools.slice(0, 4)) console.log(`    ${t.name}`);
 await beat(1.8);
@@ -96,7 +109,9 @@ console.log(`\n${rule("━")}`);
 console.log(wrap("Paid once, when you ask for a server."));
 console.log(wrap("Not by every server, at every launch."));
 console.log(rule("━"));
-console.log("  npx -y @mcp-rating/gateway");
+// One closing line, not two. The install command was competing with the URL for
+// the last frame and pushing it off the bottom; the description carries the
+// command, and a Short only ever needs one thing to remember.
 console.log("  github.com/mcprating/mcp-gateway");
 console.log();
 
