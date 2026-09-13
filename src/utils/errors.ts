@@ -47,10 +47,28 @@ export class MaxConnectionsError extends GatewayError {
   }
 }
 
+/**
+ * Note this reads as success, not failure, and says what to do next.
+ *
+ * The old text was `Server "X" is already connected.` — true, and a dead end.
+ * Observed once: gemma-4-31B connected successfully, then re-issued the
+ * identical mcp_connect six times, since nothing in that sentence said the goal
+ * was met. Tool results are read by a model, so a bare statement of fact reads
+ * as a prompt to retry; naming the exit costs nothing.
+ *
+ * Honest about the evidence: an A/B with the old wording restored did NOT
+ * reproduce the loop — the model terminated cleanly either way. That run
+ * diverged for another reason (mcp_discover hits the live registry, so the
+ * model's inputs are not fixed between runs). This wording is justified as
+ * design, not as a proven fix, and the loop it was written for remains
+ * unexplained.
+ */
 export class DuplicateConnectionError extends GatewayError {
   constructor(public readonly serverSlug: string) {
     super(
-      `Server "${serverSlug}" is already connected.`,
+      `Server "${serverSlug}" is already connected — nothing further is needed ` +
+        `to connect it. Its tools are available now: call one directly, or use ` +
+        `mcp_list_active to see what it exposes.`,
       "DUPLICATE_CONNECTION",
     );
     this.name = "DuplicateConnectionError";
