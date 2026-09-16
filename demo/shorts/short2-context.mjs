@@ -68,11 +68,40 @@ const politely = async (url) => {
 async function refresh() {
   console.log(`Measuring the ${SCAN_DEPTH} most-downloaded servers…`);
   const listed = [];
+  let toolsInline = true;
   for (let offset = 0; offset < SCAN_DEPTH; offset += 100) {
-    const page = await politely(`${API}/servers?limit=100&offset=${offset}&sortBy=downloads`);
+    // includeTools folds the schemas into the list, turning ~300 detail
+    // requests into 3. That matters more than it looks: the registry's database
+    // scales to zero after five minutes, so 300 sparse requests kept it awake
+    // far longer than the work justified — this script was a real line on a
+    // compute bill.
+    const page = await politely(
+      `${API}/servers?limit=100&offset=${offset}&sortBy=downloads&includeTools=true`,
+    );
     listed.push(...page.data);
+    // The API ignores query params it does not know, silently and with a 200.
+    // So "did it honour includeTools?" can only be answered by looking at the
+    // rows: no `tools` key means we are talking to a deployment that predates
+    // the parameter, and we fall back rather than reporting an empty corpus.
+    if (page.data.length && !("tools" in page.data[0])) toolsInline = false;
   }
 
+  if (toolsInline) {
+    const servers = listed
+      .filter((s) => Array.isArray(s.tools) && s.tools.length > 0)
+      .map((s) => ({ slug: s.slug, tools: s.tools.length, tokens: wireTokens(s.tools) }))
+      .sort((a, b) => a.tokens - b.tokens);
+    const snap = {
+      measuredAt: new Date().toISOString().slice(0, 10),
+      scanned: listed.length,
+      servers,
+    };
+    writeFileSync(SNAPSHOT, JSON.stringify(snap, null, 2) + "\n");
+    console.log(`\nWrote ${SNAPSHOT} — ${servers.length} servers, in 3 requests.`);
+    return snap;
+  }
+
+  console.log("  (API has no includeTools — falling back to per-server requests)");
   const servers = [];
   const failed = [];
   for (const s of listed) {
