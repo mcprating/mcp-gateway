@@ -25,3 +25,4 @@ demo/shorts/.render-tmp/
 demo/shorts/*-narrated.mp4
 demo/shorts/.narrate-tmp/
 demo/shorts/*.srt
+demo/*-report.json
