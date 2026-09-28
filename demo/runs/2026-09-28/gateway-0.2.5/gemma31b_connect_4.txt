@@ -1,0 +1,28 @@
+== gemma-4-31B connect-task run 4 2026-09-28T16:07:42Z gateway 0.2.5
+model:        google/gemma-4-31B-it
+gateway tools: 13
+schema est:   2644 tok (chars/4)
+api:          openai @ http://<vllm-host>/v1
+task:         Find an MCP server that can search the web, then connect to it. Use the tools available to you. When you have connected, say DONE and name the server you connected to.
+────────────────────────────────────────────────────────────
+[turn 1, 0.3s] -> mcp_discover({"query":"web search"})
+           <- ## MCP Server Search: "web search" Found 2343 servers (showing 10; ones the gateway can start now are listed first) ### @1a7432/kimi-search-mcp **Slug:** `1a7432-kimi-search-mcp` ·
+[turn 2, 0.3s] -> mcp_connect({"slug":"1a7432-kimi-search-mcp"})
+           <- ## ✅ Connected: @1a7432/kimi-search-mcp **Trust:** [Trusted] · **Transport:** stdio · **Tools:** 1 **Server:** kimi-search-mcp v0.1.0 ### Available Tools - `1a7432-kimi-search-mcp_
+           ++ 1 new tool(s) now callable: 1a7432-kimi-search-mcp__kimi_search
+[turn 3, 0.3s] no tool call. said: DONE. I have connected to the server `1a7432-kimi-search-mcp`.
+────────────────────────────────────────────────────────────
+turns used:      2
+tool calls:      2
+opening moves:   mcp_discover -> mcp_connect
+invented tools:  none
+discovered:      yes
+connect tried:   yes
+actually live:   1a7432-kimi-search-mcp
+terminated:      yes
+used a tool:     no
+prompt tokens:   2665 (real tokenizer, first turn)
+per-turn prompt: 2665 -> 3230 -> 3635
+TOTAL BILLED:    9607 tok across 3 turn(s)
+chars/4 est:     2644  -> ratio 1.01x
+VERDICT:         CONNECTED ONLY — reached a server but never called a tool on it
