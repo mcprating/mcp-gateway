@@ -186,6 +186,9 @@ log(`task:         ${TASK}\n${"─".repeat(60)}`);
 // ── Drive the loop ───────────────────────────────────────────────────────────
 const messages = [{ role: "user", content: TASK }];
 const calls = [];
+// Tool uses that returned without an error. Counting attempts instead scored
+// the 3B's rejected, malformed mcp_call_tool calls as "used a tool".
+const toolUses = [];
 let promptTokens = null;
 let done = false;
 let turn = 0;
@@ -279,6 +282,7 @@ for (; turn < MAX_TURNS && !done; turn++) {
       // tool has not understood the surface, and that is a result, not a crash.
       const r = await mcp.callTool({ name, arguments: args });
       out = (r.content || []).map((c) => c.text ?? "").join("\n").slice(0, 1500);
+      if (!r.isError) toolUses.push(name);
     } catch (err) {
       out = `ERROR: ${String(err).split("\n")[0]}`;
     }
@@ -333,8 +337,8 @@ const discovered = calls.includes("mcp_discover");
  * mcp_call_tool meta-tool. Connecting and stopping is the weaker result, and
  * conflating the two would overstate what the gateway has been shown to do.
  */
-const proxiedCalls = calls.filter((c) => !baseToolNames.has(c));
-const usedATool = proxiedCalls.length > 0 || calls.includes("mcp_call_tool");
+const proxiedCalls = toolUses.filter((c) => !baseToolNames.has(c));
+const usedATool = proxiedCalls.length > 0 || toolUses.includes("mcp_call_tool");
 // `tools` is the CURRENT list, so proxied tools that appeared after a connect
 // are legitimate. Only a name that never existed at any point is invented.
 const invented = calls.filter((c) => !tools.some((t) => t.name === c) && !baseToolNames.has(c));
