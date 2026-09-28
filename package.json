@@ -1,6 +1,6 @@
 {
   "name": "@mcp-rating/gateway",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "mcpName": "io.mcprating/gateway",
   "description": "Run MCP servers without handing them the API keys in your environment, with on-demand discovery from a public MCP registry.",
   "type": "module",

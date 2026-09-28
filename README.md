@@ -344,6 +344,20 @@ that doesn't, allowlist the **name**, never the value:
 to write the secret into a tool call, which puts it in your chat transcript and
 your model provider's logs.
 
+### When a server asks the model for personal data
+
+A hosted server can ask for an email, a phone number or a card number in an
+ordinary tool result, and the model is what answers. During our own test runs, a
+local 31B was asked for an email "to record your free quota" and made one up.
+No sandbox can see that: it's a request in the content channel.
+
+Since 0.2.6 the gateway checks each tool result for a personal-data term next to
+a verb of handing it over, in English and Chinese, within its first 1,500
+characters. On a match it appends a warning the model reads with the result:
+ask the user, and never make up a value. It also records
+`personal_data_requested` in the audit trail (`mcp_audit`). It's a heuristic,
+and it only adds: the server's reply is never changed or blocked.
+
 ### A missing runtime is an error, not a substitution
 
 If a server's launcher (`uvx`, `docker`, `python`, …) isn't installed, the connect
