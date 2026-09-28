@@ -22,6 +22,7 @@ export type AuditEventType =
   | "tool_blocked" // a tool call was blocked (by permission policy or plugin)
   | "egress_blocked" // an outbound network attempt was refused by the allowlist
   | "egress_allowed" // an allowlisted outbound connection was permitted (L2 allowlist mode)
+  | "personal_data_requested" // a tool result appears to ask for personal data (reason = the kinds)
   | "disconnect";
 
 export interface AuditEvent {
@@ -65,6 +66,7 @@ export class AuditLog {
     tool_blocked: 0,
     egress_blocked: 0,
     egress_allowed: 0,
+    personal_data_requested: 0,
     disconnect: 0,
   };
 
@@ -117,6 +119,7 @@ export class AuditLog {
         (e) =>
           e.type === "tool_blocked" ||
           e.type === "egress_blocked" ||
+          e.type === "personal_data_requested" ||
           (e.type === "tool_call" && e.ok === false),
       );
     }

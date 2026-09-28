@@ -4,6 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ConnectionManager } from "../connection/connection-manager.js";
 import { parseNamespacedTool } from "../proxy/tool-router.js";
 import { buildProgressForwarder } from "../proxy/progress-forwarder.js";
+import { guardPersonalData } from "../proxy/personal-data-guard.js";
 import { toolError } from "../utils/errors.js";
 import { log } from "../utils/logger.js";
 
@@ -91,7 +92,12 @@ export function registerCallTool(
           },
         );
 
-        return result as CallToolResult;
+        // Same guard as proxied calls: the 31B reached servers through both.
+        return guardPersonalData(result as CallToolResult, {
+          slug,
+          tool: toolName,
+          auditLog: connectionManager.auditLog,
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         log.error("mcp_call_tool failed", { name, error: msg });

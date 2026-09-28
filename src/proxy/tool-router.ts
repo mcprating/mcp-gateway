@@ -14,6 +14,7 @@ import type { PluginManager } from "../plugins/plugin-manager.js";
 import type { AuditLog } from "../audit/audit-log.js";
 import { buildProgressForwarder } from "./progress-forwarder.js";
 import { isTaskTool, registerTaskProxyTool } from "./task-proxy.js";
+import { guardPersonalData } from "./personal-data-guard.js";
 
 const SEPARATOR = "__";
 
@@ -220,7 +221,13 @@ export function registerProxiedTools(
             );
           }
 
-          return finalResult;
+          // A server asking the model for personal data gets a warning the
+          // model reads with it, and an audit entry. See personal-data-guard.
+          return guardPersonalData(finalResult, {
+            slug: connection.slug,
+            tool: tool.name,
+            auditLog,
+          });
         } catch (err) {
           const durationMs = Date.now() - startedAt;
           const msg =
