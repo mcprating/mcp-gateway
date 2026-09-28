@@ -177,16 +177,31 @@ export class ConnectionManager {
         await import("../registry/registry-client.js")
       ).RegistryClient.determineTrustTier(server);
 
-      // Resolve install command
+      // Resolve install command, else the hosted endpoint the registry lists.
+      // mcp_discover has always said "Hosted server — no install needed" for
+      // these and suggested connecting by slug, and connecting by slug always
+      // failed here with "No install command available".
       const install = this.registryClient.resolveInstallCommand(server);
-      if (!install) {
-        throw new ConnectionError(
-          `No install command available for "${slug}". Try providing explicit command and args.`,
-          slug,
-        );
+      if (install) {
+        command = install.command;
+        args = install.args;
+      } else {
+        const remote = this.registryClient.resolveRemote(server);
+        if (!remote) {
+          throw new ConnectionError(
+            `No install command or hosted endpoint recorded for "${slug}", so the gateway can't start it by slug. Connect with an explicit command and args, or pick a server mcp_discover lists as ready.`,
+            slug,
+          );
+        }
+        if (remote.requiredHeaders.length > 0) {
+          throw new ConnectionError(
+            `"${slug}" is hosted at ${remote.url} and needs the ${remote.requiredHeaders.map((h) => `"${h}"`).join(", ")} header(s), which the gateway can't send yet. Add it to your MCP client directly instead.`,
+            slug,
+          );
+        }
+        url = remote.url;
+        transportType = remote.transportType;
       }
-      command = install.command;
-      args = install.args;
     } else if (params.command) {
       // Explicit command-based connection (stdio)
       command = params.command;

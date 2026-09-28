@@ -36,6 +36,17 @@ export interface RegistryServer {
     allEnvVars: Array<{ name: string; description?: string }>;
     schemes: string[];
   } | null;
+  /**
+   * The registry's own attempt to start this server: no credentials, one
+   * machine, on a schedule. `null` means never attempted, which is not failure.
+   */
+  verification?: {
+    latestOutcome: "verified" | "needs_credentials" | "failed_to_start" | "unsupported" | string;
+    lastAttemptedAt: string;
+    lastVerifiedAt: string | null;
+    attemptCount: number;
+    verifiedCount: number;
+  } | null;
 }
 
 /** Paginated list response from the API */

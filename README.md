@@ -134,8 +134,10 @@ PRECONNECT=everything-slim OLLAMA_HOST=... node demo/ollama-probe.mjs your-model
 
 Instead of manually configuring each MCP server in your client, the Gateway:
 
-1. **Discovers** servers via the MCP-Rating registry
-2. **Connects** to them on-demand (spawns as child processes)
+1. **Discovers** servers via the MCP-Rating registry, listing first the ones it can
+   start right now (see below)
+2. **Connects** to them on-demand: spawns local ones as child processes, and
+   connects hosted ones to the endpoint the registry lists
 3. **Proxies** their tools through namespaced names (`servername__toolname`)
 4. **Notifies** your client when tools are added/removed
 
@@ -199,13 +201,32 @@ claude mcp add gateway -- npx -y @mcp-rating/gateway
 
 Restart the client after editing its config — most read it only at startup.
 
+## What `mcp_discover` puts first
+
+An agent can only use a server the gateway can start, so results are ordered by
+that, keeping relevance order within each group:
+
+1. **Verified**: the registry's own harness started it and it listed its tools
+   (`✓ Started in our test`).
+2. **Ready, untested**: installable here, or a hosted endpoint that needs no
+   header, and any key it declares is set.
+3. **Needs setup**: a declared key isn't set, its launcher (`uvx`, `docker`) isn't
+   installed, or the hosted endpoint needs a header the gateway can't send yet.
+4. **Failed in our test**: it didn't start when the registry tried it, with no
+   credentials (`✗ Didn't start in our test`).
+5. **Can't start by slug**: no install command and no endpoint recorded.
+
+"Verified" means it started and listed tools, not that every tool works without
+a key. The harness supplies none. Most of the index has never been tried; that
+says nothing either way.
+
 ## Meta-Tools
 
 The gateway exposes 13 built-in tools:
 
 | Tool | Description |
 |------|-------------|
-| `mcp_discover` | Search the MCP-Rating registry for MCP servers |
+| `mcp_discover` | Search the MCP-Rating registry; servers the gateway can start now come first |
 | `mcp_connect` | Connect to a server and make its tools available |
 | `mcp_disconnect` | Disconnect a server and remove its tools |
 | `mcp_list_active` | List connected servers and their tools |

@@ -1,5 +1,6 @@
 import { log } from "../utils/logger.js";
 import { RegistryError } from "../utils/errors.js";
+import { isCommandAvailable } from "../connection/auto-installer.js";
 import type {
   RegistryServer,
   RegistryListResponse,
@@ -16,6 +17,51 @@ export interface RegistryStatus {
   lastSuccessfulCall: Date | null;
   lastError: string | null;
   cacheSize: number;
+}
+
+/**
+ * PATH lookup, memoised per launcher for a minute. mcp_discover checks every
+ * result, and a `which`/`where` process per result would add up; a minute is
+ * short enough that installing uv mid-session is noticed.
+ */
+const commandCache = new Map<string, { ok: boolean; at: number }>();
+function hasCommandCached(command: string): boolean {
+  const hit = commandCache.get(command);
+  if (hit && Date.now() - hit.at < 60_000) return hit.ok;
+  const ok = isCommandAvailable(command);
+  commandCache.set(command, { ok, at: Date.now() });
+  return ok;
+}
+
+/** A hosted server's endpoint, as the registry lists it in `metadata.remotes`. */
+export interface RemoteEndpoint {
+  url: string;
+  transportType: "sse" | "streamable-http";
+  /** Headers the endpoint says it needs — the gateway cannot send these yet. */
+  requiredHeaders: string[];
+}
+
+/**
+ * Whether the gateway can start a server right now, from registry data, this
+ * machine and the registry's own verification run:
+ *   - "ready"          — installable or keyless-hosted, launcher present, any
+ *                        declared keys set, and not seen failing in our test
+ *   - "needs-setup"    — a declared key is missing here, the launcher (uvx,
+ *                        docker…) isn't installed, the hosted endpoint needs a
+ *                        header the gateway can't send, or our test found it
+ *                        needs credentials
+ *   - "failed-in-test" — runnable on paper, but didn't start when the registry
+ *                        tried it (no credentials given)
+ *   - "not-runnable"   — no install command and no usable endpoint
+ */
+export interface Readiness {
+  level: "ready" | "needs-setup" | "failed-in-test" | "not-runnable";
+  via: "install" | "remote" | null;
+  /** Env var, header or launcher names that are missing. */
+  missing: string[];
+  remote: RemoteEndpoint | null;
+  /** True when the registry's latest attempt started it and listed its tools. */
+  verified: boolean;
 }
 
 /**
@@ -137,6 +183,76 @@ export class RegistryClient {
       return { command: "npx", args: ["-y", server.npmPackage] };
     }
     return null;
+  }
+
+  /**
+   * The first http(s) endpoint in `metadata.remotes`. Anything else — a
+   * `javascript:` or `file:` URL in registry data somebody else wrote — is
+   * skipped, as the website's remoteLaunch does.
+   */
+  resolveRemote(server: RegistryServer): RemoteEndpoint | null {
+    const remotes = (server.metadata as { remotes?: unknown } | null | undefined)?.remotes;
+    if (!Array.isArray(remotes)) return null;
+    for (const r of remotes as Array<{ url?: unknown; type?: unknown; headers?: unknown } | null>) {
+      if (!r || typeof r.url !== "string") continue;
+      let parsed: URL;
+      try {
+        parsed = new URL(r.url);
+      } catch {
+        continue;
+      }
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") continue;
+      const headers = Array.isArray(r.headers)
+        ? (r.headers as Array<{ name?: unknown; isRequired?: unknown; isSecret?: unknown } | null>)
+        : [];
+      const requiredHeaders = headers
+        .filter((h) => h && typeof h.name === "string" && (h.isRequired === true || h.isSecret === true))
+        .map((h) => String(h!.name));
+      return {
+        url: parsed.href,
+        transportType: r.type === "sse" ? "sse" : "streamable-http",
+        requiredHeaders,
+      };
+    }
+    return null;
+  }
+
+  /**
+   * See {@link Readiness}. `env` defaults to this process's environment, and
+   * `hasCommand` to a PATH lookup; both are injectable for tests.
+   */
+  readiness(
+    server: RegistryServer,
+    env: NodeJS.ProcessEnv = process.env,
+    hasCommand: (command: string) => boolean = hasCommandCached,
+  ): Readiness {
+    const outcome = server.verification?.latestOutcome ?? null;
+    const verified = outcome === "verified";
+    // Our own test outranks metadata: a server that didn't start for us with no
+    // credentials won't start for an agent with none either.
+    const tested = (missing: string[], via: Readiness["via"], remote: RemoteEndpoint | null): Readiness => {
+      if (missing.length > 0 || outcome === "needs_credentials") {
+        return { level: "needs-setup", via, missing, remote, verified };
+      }
+      if (outcome === "failed_to_start") {
+        return { level: "failed-in-test", via, missing, remote, verified };
+      }
+      return { level: "ready", via, missing, remote, verified };
+    };
+
+    const install = this.resolveInstallCommand(server);
+    if (install) {
+      const declared = (server.authDetails?.envVars ??
+        (server.metadata?.authEnvVars as Array<{ name?: string }> | undefined) ??
+        []) as Array<{ name?: string }>;
+      const missing = declared.map((e) => e?.name).filter((n): n is string => !!n && !env[n]);
+      // npx comes with the Node running this gateway; anything else must be here.
+      if (install.command !== "npx" && !hasCommand(install.command)) missing.unshift(install.command);
+      return tested(missing, "install", null);
+    }
+    const remote = this.resolveRemote(server);
+    if (remote) return tested(remote.requiredHeaders, "remote", remote);
+    return { level: "not-runnable", via: null, missing: [], remote: null, verified };
   }
 
   /**
