@@ -67,10 +67,12 @@ A connected server runs inside a sandbox and the agent is told so:
 - No network access (declared)
 ```
 
-- **L1** — process-level env scoping: the child inherits none of your environment, so an
-  `AWS_SECRET_ACCESS_KEY` in the parent shell isn't readable by a server you just found.
-- **L2** — container isolation with an **egress allowlist**, so a server can only reach
-  hosts it declared.
+- **L1** (default) — process-level env scoping: the child inherits none of your
+  environment, so an `AWS_SECRET_ACCESS_KEY` in the parent shell isn't readable by a
+  server you just found. Files and network are *not* restricted at L1:
+  `~/.aws/credentials` on disk is still readable.
+- **L2** (opt-in, needs Docker) — container isolation: only declared paths mounted,
+  `network: none` enforced, and an egress allowlist for proxy-aware clients.
 - **Audit trail** — `mcp_audit` records connections and tool calls.
 
 This is what makes runtime discovery *safe enough to be a good idea*. Discovery without

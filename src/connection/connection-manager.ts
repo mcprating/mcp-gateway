@@ -254,7 +254,7 @@ export class ConnectionManager {
         parts.push(
           `🔑 **${displayName}** needs ${missingEnv.length} environment variable(s) that aren't set: ${missingEnv
             .map((v) => "`" + v + "`")
-            .join(", ")}.\nSet them in your shell, or pass them via \`env: { ... }\`, then reconnect.`,
+            .join(", ")}.\nAdd them to the gateway's \`env\` in your MCP client config and restart the client. The gateway passes a server only the variables it declares, and the key never enters this conversation. Passing values via \`env: { ... }\` here also works, but puts the secret in the chat transcript.`,
         );
       }
       parts.push("To proceed anyway, call `mcp_connect` again with `confirmed: true`.");

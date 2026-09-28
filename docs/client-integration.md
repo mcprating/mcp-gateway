@@ -206,5 +206,5 @@ matter more here than in local mode.
 | `spawn node ENOENT` | `node` is not on the PATH the client inherits; use an absolute path to the node binary |
 | Discovery returns nothing | `MCP_GATEWAY_REGISTRY_URL` still points at a local instance that isn't running — remove it to use the public default |
 | Scores all show `0/100 · Unverified` | Historic bug (search results dropped `qualityScore`), fixed; if seen again, purge the API response cache |
-| `mcp_connect` warns about missing env vars | Working as intended — the server needs API keys; pass them via `env` |
+| `mcp_connect` warns about missing env vars | Working as intended: the server needs API keys. Add them to the gateway's `env` in your client config and restart, so the key never enters the chat. See the README's "Giving a server an API key" |
 | Downstream connect fails with "server-crashed-on-start" | Usually the server requires auth/config it didn't get. Auth is the single biggest cause of connect failures, not the Gateway |

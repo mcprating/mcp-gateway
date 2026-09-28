@@ -164,37 +164,53 @@ export class ManifestResolver {
       lines.push("No environment variables (secrets) exposed");
     }
 
+    // Network and filesystem limits are enforced only inside a container. The
+    // model relays these lines to the user, so outside one they must say
+    // "not restricted" — "No network access (declared)" read as a guarantee
+    // for a process that could reach anything and read the whole home folder.
+    const contained = manifest.enforcement === "l2-container";
+
     // Network
-    switch (manifest.network.mode) {
-      case "none":
-        lines.push("No network access (declared)");
-        break;
-      case "allowlist":
-        lines.push(
-          manifest.network.allow.length > 0
-            ? `Network limited to: ${manifest.network.allow.join(", ")} (declared)`
-            : "Network: allowlist (none specified) (declared)",
-        );
-        break;
-      case "all":
-        lines.push("Full network access (declared)");
-        sensitive = true;
-        break;
+    if (!contained) {
+      lines.push("Network: not restricted (limits apply only with container isolation)");
+    } else {
+      switch (manifest.network.mode) {
+        case "none":
+          lines.push("No network access (container has no network)");
+          break;
+        case "allowlist":
+          lines.push(
+            manifest.network.allow.length > 0
+              ? `Network limited to: ${manifest.network.allow.join(", ")} (proxy-aware clients only)`
+              : "Network: allowlist with no hosts (proxy-aware clients only)",
+          );
+          break;
+        case "all":
+          lines.push("Full network access");
+          sensitive = true;
+          break;
+      }
     }
 
     // Filesystem
-    const fsRead = manifest.filesystem.read.length;
-    const fsWrite = manifest.filesystem.write.length;
-    if (fsRead > 0 || fsWrite > 0) {
+    if (!contained) {
       lines.push(
-        `Filesystem: ${fsRead} read path(s), ${fsWrite} write path(s) (declared)`,
+        "Files: not restricted, so it can read what your user can, including ~/.ssh and ~/.aws (set MCP_GATEWAY_CONTAINER_ISOLATION=true to restrict)",
+      );
+    } else {
+      const fsRead = manifest.filesystem.read.length;
+      const fsWrite = manifest.filesystem.write.length;
+      lines.push(
+        fsRead > 0 || fsWrite > 0
+          ? `Files: ${fsRead} read path(s), ${fsWrite} write path(s) mounted; nothing else from the host`
+          : "Files: nothing from the host is mounted",
       );
       if (fsWrite > 0) sensitive = true;
     }
 
-    // Subprocess
+    // Subprocess — declared only; no level enforces it yet.
     if (manifest.subprocess) {
-      lines.push("May spawn subprocesses (declared)");
+      lines.push("May spawn subprocesses (declared, not enforced)");
       sensitive = true;
     }
 

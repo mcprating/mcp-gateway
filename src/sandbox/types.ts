@@ -6,12 +6,15 @@
  * server.
  *
  * Enforcement is layered:
- *  - **L1 (this release)**: environment-variable scoping is enforced at process
- *    spawn (cross-platform, in-process). Network / filesystem / subprocess
- *    fields are DECLARED and surfaced to the user via HITL, with hard
- *    enforcement delegated to L2 (container/microVM) and L3 (WASM).
- *  - **L2 / L3 (future)**: network egress filtering, filesystem jails,
- *    subprocess blocking, and resource limits become enforced.
+ *  - **L1 (default)**: environment-variable scoping is enforced at process
+ *    spawn (cross-platform, in-process). Network and filesystem are NOT
+ *    restricted — the server can reach any host and read what the user can —
+ *    and the connect summary says so rather than listing the declared limits.
+ *  - **L2 (opt-in, needs Docker/Podman)**: read-only root, only the declared
+ *    paths mounted, `network: none` enforced, `allowlist` via an egress proxy
+ *    for proxy-aware clients, resource limits.
+ *  - **L3 (not built)**: WASM. Subprocess blocking is declared at every level
+ *    and enforced at none.
  *
  * Declaring a capability today (even before it is hard-enforced) is valuable:
  * it makes the security posture visible, gives the user an informed consent

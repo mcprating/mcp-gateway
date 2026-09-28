@@ -247,6 +247,6 @@ mcp_disconnect({slug: "mcp-deepwiki-com"})
 | Gateway shows 0 tools in Cursor | `pnpm gateway:build`, then fully restart Cursor |
 | `spawn node ENOENT` | Use an absolute path to the node binary in `args[0]`/`command` |
 | Connect returns a confirmation warning | Expected for untrusted servers — retry with `confirmed: true` |
-| `server-crashed-on-start` | The server almost certainly needs API keys. Pass them: `mcp_connect({slug: "...", env: {"API_KEY": "..."}})`. Auth is the #1 cause of connect failures |
+| `server-crashed-on-start` | The server almost certainly needs API keys; auth is the #1 cause of connect failures. Add the key to the gateway's `env` in `~/.cursor/mcp.json` and restart Cursor. Passing it via `mcp_connect({env: …})` also works, but puts the key in the chat |
 | Newly connected tools not in Cursor's tool list | Use `mcp_call_tool` with the `slug__tool` name |
 | Discovery says "No install command recorded" | That server genuinely has none (often a `github-manual` entry). Connecting by slug still works — the Gateway resolves it at connect time |

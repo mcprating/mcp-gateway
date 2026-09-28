@@ -1,8 +1,8 @@
 {
   "name": "@mcp-rating/gateway",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "mcpName": "io.mcprating/gateway",
-  "description": "Run MCP servers without handing them your API keys — sandboxed execution plus on-demand discovery from a public MCP registry.",
+  "description": "Run MCP servers without handing them the API keys in your environment, with on-demand discovery from a public MCP registry.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

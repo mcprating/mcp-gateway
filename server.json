@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.mcprating/gateway",
-  "description": "Discover, judge and safely run any MCP server: 57k+ scored servers, sandboxed.",
-  "version": "0.2.2",
+  "description": "Find MCP servers in the MCP Rating index and connect on demand, with env vars scoped per server.",
+  "version": "0.2.4",
   "websiteUrl": "https://mcprating.io/gateway",
   "repository": {
     "url": "https://github.com/mcprating/mcp-gateway",
@@ -12,7 +12,7 @@
     {
       "registryType": "npm",
       "identifier": "@mcp-rating/gateway",
-      "version": "0.2.2",
+      "version": "0.2.4",
       "transport": {
         "type": "stdio"
       }

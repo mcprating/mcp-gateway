@@ -3,15 +3,19 @@
 [![npm](https://img.shields.io/npm/v/@mcp-rating/gateway?style=flat-square)](https://www.npmjs.com/package/@mcp-rating/gateway)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](./LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-compatible-blue?style=flat-square)](https://modelcontextprotocol.io)
-[![tests](https://img.shields.io/badge/sandbox%20tests-18-brightgreen?style=flat-square)](./src/sandbox/sandbox.test.ts)
 
-**Run MCP servers without handing them your API keys.**
+**Run MCP servers without handing them the API keys in your environment.**
 
 Adding an MCP server to your client today spawns somebody else's code with your
 entire environment attached — `AWS_SECRET_ACCESS_KEY`, `OPENAI_API_KEY`,
 `DATABASE_URL`, everything in your shell. The gateway spawns them with a
 constructed environment instead: `PATH`, `HOME`, and only the variables you or
-its manifest name. Nothing else is there to read.
+its manifest name. Nothing else from your environment is there to read.
+
+**Files are a different matter.** By default a server still runs as you, so it
+can read what you can — `~/.ssh`, `~/.aws/credentials`, a project's `.env`. Only
+container isolation (opt-in, needs Docker) closes that. See
+[what each level protects](#security-model).
 
 <!-- Absolute URL on purpose: relative image paths render on GitHub but break on
      npmjs.com, which is where anyone arriving via `npx` reads this. -->
@@ -21,7 +25,8 @@ variable in the shell; through the gateway it sees fifteen, none sensitive.](htt
 | | Raw spawn (every MCP client today) | Through the gateway |
 |---|---|---|
 | Environment visible to the server | **your entire shell** | `PATH`, `HOME`, and what you name |
-| Credentials readable | **all of them** | none |
+| Credentials in environment variables | **all of them** | none you didn't name |
+| Credential files (`~/.ssh`, `~/.aws`, `.env`) | readable | **still readable**, unless container isolation is on |
 
 *Reproduce it yourself in about ten seconds — `node demo/run-demo.mjs` plants two fake
 credentials, reads your real environment, and prints only the count and the planted
@@ -266,22 +271,64 @@ Exported shell functions (`BASH_FUNC_*`) are dropped rather than forwarded.
 This is genuine enforcement: the child process is spawned with a constructed
 environment, so there is nothing to opt out of or bypass.
 
+**L1 does not restrict files or the network.** The server runs as your user: it
+can read anything you can, including `~/.ssh`, `~/.aws/credentials` and `.env`
+files, and it can connect to any host. A manifest can *declare* network and
+filesystem limits, but outside a container nothing enforces them, and the
+connect summary says "not restricted" rather than listing them.
+
 ### L2 — container isolation (opt-in)
 
-When a manifest requests it, or `MCP_GATEWAY_CONTAINER_ISOLATION=true`, the
-server runs under `docker`/`podman` with an ephemeral container.
+With `MCP_GATEWAY_CONTAINER_ISOLATION=true`, community and unknown servers run
+under `docker`/`podman` in an ephemeral container. You can also opt one server
+in with `mcp_sandbox({action: "set", slug: "…", enforcement: "l2-container"})`.
+Inside, the server gets a read-only root, a scratch `/tmp`, and only the paths
+its manifest declares mounted from the host. `network: "none"` gives the
+container no network at all. Without Docker or Podman, the gateway falls back to
+L1 and logs that it did.
 
 ### Network allowlists: read this before relying on them
 
-`network: "allowlist"` starts an in-process forward proxy and points the child at
-it via `HTTP_PROXY`/`HTTPS_PROXY`.
+Allowlists apply **only under L2.** `network: "allowlist"` starts a forward
+proxy and points the container at it via `HTTP_PROXY`/`HTTPS_PROXY`.
 
 **This filters proxy-aware clients only.** Node's fetch/undici, axios, and Python
 requests all honour those variables, which covers most real servers. A program
 that opens raw TCP sockets, or a compiled binary that ignores proxy environment
-variables, **is not filtered**. Treat allowlists in L1 as a guard rail against
-honest code, not a containment boundary against hostile code — for that you need
-L2 with container network namespacing.
+variables, **is not filtered**. Treat an allowlist as a guard rail against honest
+code, not a containment boundary against hostile code. For that, use
+`network: "none"`.
+
+### Giving a server an API key
+
+Put the key in the gateway's `env` in your client config, not in the chat:
+
+```json
+{
+  "mcpServers": {
+    "gateway": {
+      "command": "npx",
+      "args": ["-y", "@mcp-rating/gateway"],
+      "env": { "GITHUB_TOKEN": "ghp_…" }
+    }
+  }
+}
+```
+
+A server receives it only if its registry entry declares that variable. For one
+that doesn't, allowlist the **name**, never the value:
+`mcp_sandbox({action: "set", slug: "…", envAllow: ["GITHUB_TOKEN"]})`.
+
+`mcp_connect` also accepts `env: { NAME: "value" }`. That works, but the model has
+to write the secret into a tool call, which puts it in your chat transcript and
+your model provider's logs.
+
+### A missing runtime is an error, not a substitution
+
+If a server's launcher (`uvx`, `docker`, `python`, …) isn't installed, the connect
+fails with a message naming what to install. Before 0.2.4, a missing launcher was
+rewritten to `npx -y <name>`, which ran whatever npm package shared its name. On a
+machine without Docker, that was the unrelated npm package `docker`.
 
 Allowlist patterns fail **closed**: a malformed pattern such as `*example.com`
 (missing dot) matches nothing rather than everything. The gateway warns at
