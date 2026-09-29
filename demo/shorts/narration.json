@@ -40,8 +40,8 @@
       },
       {
         "at": 24.0,
-        "text": "One in three works. All of them read your keys.",
-        "display": "One in three works. All of them read your keys."
+        "text": "One in three works. Starting them safely is the other half.",
+        "display": "One in three works. Starting them safely is the other half."
       }
     ]
   },
@@ -50,8 +50,8 @@
     "segments": [
       {
         "at": 0.5,
-        "text": "Every M C P server you install can read your whole shell.",
-        "display": "Every MCP server you install can read your whole shell."
+        "text": "Start an M C P server with your whole shell, and it can read all of it.",
+        "display": "Start an MCP server with your whole shell, and it can read all of it."
       },
       {
         "at": 6.5,

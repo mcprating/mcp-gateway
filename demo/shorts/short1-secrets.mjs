@@ -70,7 +70,7 @@ console.log("    DEMO_AWS_SECRET_ACCESS_KEY");
 await beat(1.2);
 
 // ── ACT 1 ────────────────────────────────────────────────────────────────────
-heading("1. How every MCP client works today");
+heading("1. Started with the whole environment");
 {
   const transport = new StdioClientTransport({
     command: "node",

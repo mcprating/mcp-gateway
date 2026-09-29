@@ -76,14 +76,18 @@ node demo/shorts/short1-secrets.mjs
 Runtime ~20s. **Read the numbers off your own run** — the variable count and
 credential count depend on your shell, so the script below marks them `[N]`.
 
-> **[0:00]** If you use MCP servers in Claude Desktop or Cursor, every one of
-> them can read your entire shell. Including your API keys.
+> **[0:00]** Start an MCP server with your whole environment, and it can read all
+> of it, API keys included. The official SDKs don't do that by default; a client
+> or script that passes its environment through does.
 >
-> **[0:06]** This is a deliberately malicious MCP server. I'm running it exactly
-> the way every MCP client runs them today. It asked for nothing — and it
-> received all **[N]** variables in my environment. It took **[N]** credentials.
-> Two of those are fakes I planted. The rest are real, and no, I'm not showing
-> you those.
+> **[0:06]** This is a deliberately malicious MCP server, started with the whole
+> environment. It asked for nothing, and it received all **[N]** variables. It
+> took **[N]** credentials, every one a fake planted for the demo.
+>
+> *Don't name Claude Desktop, Cursor or any other client here until the client
+> probe has measured what it actually passes. The official SDK's default
+> (`getDefaultEnvironment()`) is a short allowlist, so "every client" is false for
+> any client built on it.*
 >
 > **[0:20]** Same server, through the gateway. It gets a constructed
 > environment: **[N]** variables, none of them sensitive. It took nothing,

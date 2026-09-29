@@ -5,8 +5,11 @@
  * Plants a fake secret in the environment, then runs the same "malicious"
  * MCP server two ways:
  *
- *   ACT 1 — raw spawn (what every MCP client does today): the server reads the
- *           secret straight out of the inherited environment. LEAKED.
+ *   ACT 1 — spawned with the whole environment, as a client or script does when
+ *           it passes `env: process.env`: the server reads the secret straight
+ *           out of it. LEAKED. This is not every client: the official SDKs pass
+ *           a short allowlist by default, and which popular clients pass more
+ *           has not been measured yet.
  *   ACT 2 — through the MCP Rating gateway with default env scoping: the server
  *           only sees its allowlist (empty for an unknown server). PROTECTED.
  *
@@ -48,13 +51,15 @@ const beat = (factor = 1) =>
   PACE_MS ? new Promise((r) => setTimeout(r, PACE_MS * factor)) : Promise.resolve();
 
 async function act1RawSpawn() {
-  console.log(`\n${line}\n  ACT 1 — Raw spawn (today's status quo, every MCP client)\n${line}`);
+  console.log(`\n${line}\n  ACT 1 — Spawned with the whole environment (env: process.env)\n${line}`);
   const transport = new StdioClientTransport({
     command: "node",
     args: [EVIL],
-    // Note: StdioClientTransport defaults to a safe subset, BUT real clients
-    // commonly pass `env: process.env` to forward tokens the server needs —
-    // which forwards EVERYTHING. We mimic that common (unsafe) pattern:
+    // StdioClientTransport defaults to a safe subset (HOME, PATH, USER…). A
+    // client or script that passes `env: process.env` — the easy way to forward
+    // the token a server needs — forwards everything. That is the case shown
+    // here. It is not a claim about any particular client: which ones do this
+    // hasn't been measured.
     env: { ...process.env },
   });
   const client = new Client({ name: "demo", version: "1.0.0" });
@@ -99,7 +104,12 @@ function indent(s) {
 }
 
 console.log("\n💀 MCP Sandbox Demo — can a malicious server steal your secrets?");
-console.log(`   Planted in environment: DEMO_SECRET_API_KEY, DEMO_AWS_SECRET_ACCESS_KEY`);
+// Every planted fake, not a hard-coded pair: render-gif.mjs plants more, and a
+// header listing two above a result stealing four reads as a mistake.
+const planted = Object.keys(process.env)
+  .filter((k) => k.startsWith("DEMO_") && k !== "DEMO_PACE_MS")
+  .sort();
+console.log(`   Planted ${planted.length} fake secrets in the environment (DEMO_*)`);
 await beat(0.8);
 
 await act1RawSpawn();
@@ -108,8 +118,8 @@ await act2Gateway();
 await beat(1.2);   // and on "nothing to steal"
 
 console.log(`\n${line}`);
-console.log("  Takeaway: same server, same secret. Raw spawn leaks it;");
-console.log("  the gateway's env scoping withholds it. The server's allowlist");
-console.log("  was empty because it's an unknown/untrusted server.");
+console.log("  Takeaway: same server, same secret. Passing the whole");
+console.log("  environment leaks it; the gateway's env scoping withholds it.");
+console.log("  The allowlist was empty because it's an unknown server.");
 console.log(`${line}\n`);
 process.exit(0);
