@@ -25,3 +25,10 @@ export const GATEWAY_VERSION: string = (() => {
     return "0.0.0-unknown";
   }
 })();
+
+/**
+ * Sent on every request to the MCP Rating API, so the registry can tell the
+ * gateway's searches from its own tests and from other API clients. It carries
+ * the version and nothing about the machine or the user.
+ */
+export const USER_AGENT = `mcp-rating-gateway/${GATEWAY_VERSION} (+https://github.com/mcprating/mcp-gateway)`;

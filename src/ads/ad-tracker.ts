@@ -1,4 +1,5 @@
 import { log } from "../utils/logger.js";
+import { USER_AGENT } from "../version.js";
 import { randomUUID } from "node:crypto";
 
 export interface AdEvent {
@@ -104,6 +105,7 @@ export class AdTracker {
     try {
       const res = await fetch(`${this.registryApiUrl}/partners/me/revenue`, {
         headers: {
+          "User-Agent": USER_AGENT,
           "x-partner-key": this.partnerKey,
         },
         signal: AbortSignal.timeout(5_000),
@@ -159,6 +161,7 @@ export class AdTracker {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "User-Agent": USER_AGENT,
         "x-partner-key": this.partnerKey,
       },
       body: JSON.stringify({

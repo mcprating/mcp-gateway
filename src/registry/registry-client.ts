@@ -1,6 +1,7 @@
 import { log } from "../utils/logger.js";
 import { RegistryError } from "../utils/errors.js";
 import { isCommandAvailable } from "../connection/auto-installer.js";
+import { USER_AGENT } from "../version.js";
 import type {
   RegistryServer,
   RegistryListResponse,
@@ -319,7 +320,7 @@ export class RegistryClient {
   // ── Retry helper ───────────────────────────────────────────────
 
   private async fetchWithRetry(url: string, maxRetries = 2): Promise<Response> {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { "User-Agent": USER_AGENT };
     if (this.partnerKey) {
       headers["x-partner-key"] = this.partnerKey;
     }
