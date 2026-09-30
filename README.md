@@ -13,8 +13,9 @@ few more. A client or script that passes its whole environment, often just to
 forward the one token a server needs, hands over everything. We haven't yet
 measured which popular clients do which, so we don't name any. The gateway
 doesn't leave it to the client: it spawns every server with a constructed
-environment, `PATH`, `HOME`, and only the variables you or its manifest name.
-Nothing else from your environment is there to read.
+environment, the SDK's short allowlist (`PATH`, `HOME`, `USER` and a few
+more) plus only the variables you or its manifest name. Nothing else from your
+environment is there to read.
 
 **Files are a different matter.** By default a server still runs as you, so it
 can read what you can — `~/.ssh`, `~/.aws/credentials`, a project's `.env`. Only
@@ -29,7 +30,7 @@ variables, none sensitive.](https://raw.githubusercontent.com/mcprating/mcp-gate
 
 | | Started with the whole environment | Through the gateway |
 |---|---|---|
-| Environment visible to the server | **everything the client had** | `PATH`, `HOME`, and what you name |
+| Environment visible to the server | **everything the client had** | a short allowlist (`PATH`, `HOME`, `USER` and a few more), and what you name |
 | Credentials in environment variables | **all of them** | none you didn't name |
 | Credential files (`~/.ssh`, `~/.aws`, `.env`) | readable | **still readable**, unless container isolation is on |
 
@@ -285,14 +286,16 @@ The gateway reads config from `~/.mcp-gateway/config.json`:
 
 ## Security model
 
-The gateway exists because plain MCP hands every server your whole environment.
-Two layers push back, and it is worth being precise about what each one does and
-does not do.
+The gateway exists so that what a server can see doesn't depend on how your
+client happens to start it. Two layers push back, and it is worth being precise
+about what each one does and does not do.
 
 ### L1 — environment scoping (always on, for stdio servers)
 
-A downstream server receives `PATH`, `HOME` and friends, plus only the variable
-**names** its manifest allowlists or you pass at connect time. Everything else in
+A downstream server receives the MCP SDK's default allowlist (`HOME`, `LOGNAME`,
+`PATH`, `SHELL`, `TERM`, `USER` on macOS and Linux; `PATH`, `USERPROFILE`,
+`APPDATA`, `TEMP` and a few more on Windows), plus only the variable **names**
+its manifest allowlists or you pass at connect time. Everything else in
 the parent environment — `AWS_*`, `OPENAI_API_KEY`, `DATABASE_URL` — is withheld.
 Exported shell functions (`BASH_FUNC_*`) are dropped rather than forwarded.
 

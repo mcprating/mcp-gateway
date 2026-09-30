@@ -43,3 +43,12 @@ jobs:
       - run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # A GitHub Release for the tag, once npm has the package. Glama's
+      # Auto-Release builds on GitHub releases, not tags, so with tags alone its
+      # listing stayed on 0.2.3 while npm moved on to 0.2.8.
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
