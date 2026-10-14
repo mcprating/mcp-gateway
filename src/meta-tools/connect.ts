@@ -4,7 +4,7 @@ import type { ConnectionManager } from "../connection/connection-manager.js";
 import { isConfirmationRequired } from "../connection/types.js";
 import { namespaceTool } from "../proxy/tool-router.js";
 import { TRUST_LABELS } from "../permissions/trust-tiers.js";
-import { ManifestResolver } from "../sandbox/manifest-resolver.js";
+import { ManifestResolver, containmentRemedy } from "../sandbox/manifest-resolver.js";
 import { toolError } from "../utils/errors.js";
 
 export function registerConnect(
@@ -118,8 +118,17 @@ export function registerConnect(
         }
 
         // Sandbox: show what the server was granted access to (L1)
-        if (conn?.manifest) {
-          const summ = ManifestResolver.summarize(conn.manifest);
+        const resolver = connectionManager.manifestResolver;
+        if (conn?.manifest && resolver) {
+          const summ = ManifestResolver.summarize(
+            conn.manifest,
+            containmentRemedy({
+              resolved: conn.resolvedManifest ?? conn.manifest,
+              trustTier: conn.trustTier,
+              containerIsolation: resolver.containerIsolation,
+              hasOverride: Boolean(resolver.getOverride(conn.slug)),
+            }),
+          );
           lines.push(
             "",
             `### 🛡️ Sandbox (${summ.enforcement})`,

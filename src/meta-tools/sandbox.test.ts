@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { registerSandbox } from "./sandbox.js";
 import type { CapabilityManifest } from "../sandbox/types.js";
+import type { TrustTier } from "../registry/types.js";
 
 /**
  * The handler around overrideForSet: it asks the registry for the trust tier
@@ -25,6 +26,9 @@ function setup(opts: {
   live?: CapabilityManifest;
   /** What the live connection's connect resolved, when it fell back from it. */
   resolved?: CapabilityManifest;
+  trustTier?: TrustTier;
+  /** MCP_GATEWAY_CONTAINER_ISOLATION; on unless a test says otherwise. */
+  containerIsolation?: boolean;
   getServer?: () => Promise<unknown>;
 }) {
   let handler!: Handler;
@@ -41,10 +45,16 @@ function setup(opts: {
       manifestResolver: {
         getOverride: () => opts.saved,
         saveOverride,
-        containerIsolation: true,
+        containerIsolation: opts.containerIsolation ?? true,
       },
       getConnection: () =>
-        opts.live ? { manifest: opts.live, resolvedManifest: opts.resolved } : undefined,
+        opts.live
+          ? {
+              manifest: opts.live,
+              resolvedManifest: opts.resolved,
+              trustTier: opts.trustTier ?? "unknown",
+            }
+          : undefined,
     } as never,
     { getServer } as never,
   );
@@ -67,8 +77,10 @@ const CONTAINED: CapabilityManifest = {
   subprocess: false,
 };
 
+const ON_HOST: CapabilityManifest = { ...CONTAINED, enforcement: "l1-process" };
+
 /** What connect records for CONTAINED with no Docker or Podman to run it. */
-const FELL_BACK = { live: { ...CONTAINED, enforcement: "l1-process" as const }, resolved: CONTAINED };
+const FELL_BACK = { live: ON_HOST, resolved: CONTAINED };
 
 describe("mcp_sandbox set", () => {
   it("keeps a slug the registry doesn't know in its container, as unknown", async () => {
@@ -145,5 +157,24 @@ describe("mcp_sandbox view", () => {
   it("adds nothing for a connection running what it resolved", async () => {
     const { view } = setup({ live: CONTAINED });
     expect(await view()).not.toContain("Runs as");
+  });
+
+  it("tells a fallen-back connection to start an engine, not to turn on isolation that is on", async () => {
+    const { view } = setup(FELL_BACK);
+    const text = await view();
+    expect(text).toContain("no Docker or Podman was found; start one and reconnect to restrict");
+    expect(text).not.toContain("MCP_GATEWAY_CONTAINER_ISOLATION");
+  });
+
+  it("points a verified server under isolation at an override, the one thing that contains it", async () => {
+    const { view } = setup({ live: ON_HOST, trustTier: "verified" });
+    const text = await view();
+    expect(text).toContain('mcp_sandbox({action: "set", slug: "srv", enforcement: "l2-container"})');
+    expect(text).not.toContain("MCP_GATEWAY_CONTAINER_ISOLATION");
+  });
+
+  it("suggests the isolation setting where it is off and would contain the server", async () => {
+    const { view } = setup({ live: ON_HOST, trustTier: "community", containerIsolation: false });
+    expect(await view()).toContain("(set MCP_GATEWAY_CONTAINER_ISOLATION=true to restrict)");
   });
 });

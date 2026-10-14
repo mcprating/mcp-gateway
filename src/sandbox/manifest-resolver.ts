@@ -123,6 +123,34 @@ export function withConnectEnv(
   return { ...manifest, env: { ...manifest.env, allow: [...manifest.env.allow, ...added] } };
 }
 
+/**
+ * What would put a server that runs outside a container into one, for the
+ * summary to tell the user. The summary used to say "set
+ * MCP_GATEWAY_CONTAINER_ISOLATION=true" for every such server, including ones
+ * that setting can't move: where it was already on and the server was
+ * verified, trusted, or had fallen back for want of an engine.
+ *  - "start-engine": its manifest asks for l2-container, but no Docker or
+ *    Podman was found when it connected.
+ *  - "enable-isolation": the setting is off, and turning it on would do it,
+ *    as the server is community or unknown with no saved override.
+ *  - "set-enforcement": only an override asking for l2-container would: its
+ *    tier stays on L1 even under isolation, or a saved override says L1.
+ */
+export type ContainmentRemedy = "start-engine" | "enable-isolation" | "set-enforcement";
+
+export function containmentRemedy(opts: {
+  /** What the connect resolved, before any fallback to L1 (resolvedManifest). */
+  resolved: CapabilityManifest;
+  trustTier: TrustTier;
+  containerIsolation: boolean;
+  hasOverride: boolean;
+}): ContainmentRemedy {
+  if (opts.resolved.enforcement === "l2-container") return "start-engine";
+  const escalates = opts.trustTier === "community" || opts.trustTier === "unknown";
+  if (!opts.containerIsolation && escalates && !opts.hasOverride) return "enable-isolation";
+  return "set-enforcement";
+}
+
 /** What the registry said when asked about a slug outside a connect. */
 export type TrustLookup =
   | { status: "found"; server: RegistryServer; trustTier: TrustTier }
@@ -295,8 +323,13 @@ export class ManifestResolver {
 
   /**
    * Build a human-readable summary of a manifest for the HITL prompt.
+   * `remedy` says what would contain the server when it runs outside a
+   * container (containmentRemedy); the default is the one that always applies.
    */
-  static summarize(manifest: CapabilityManifest): ManifestSummary {
+  static summarize(
+    manifest: CapabilityManifest,
+    remedy: ContainmentRemedy = "set-enforcement",
+  ): ManifestSummary {
     const lines: string[] = [];
     let sensitive = false;
 
@@ -340,8 +373,14 @@ export class ManifestResolver {
 
     // Filesystem
     if (!contained) {
+      const toRestrict = {
+        "start-engine":
+          "its sandbox asks for a container, but no Docker or Podman was found; start one and reconnect to restrict",
+        "enable-isolation": "set MCP_GATEWAY_CONTAINER_ISOLATION=true to restrict",
+        "set-enforcement": `to restrict, run it in a container, which needs Docker or Podman: mcp_sandbox({action: "set", slug: ${JSON.stringify(manifest.slug)}, enforcement: "l2-container"})`,
+      }[remedy];
       lines.push(
-        "Files: not restricted, so it can read what your user can, including ~/.ssh and ~/.aws (set MCP_GATEWAY_CONTAINER_ISOLATION=true to restrict)",
+        `Files: not restricted, so it can read what your user can, including ~/.ssh and ~/.aws (${toRestrict})`,
       );
     } else {
       const fsRead = manifest.filesystem.read.length;
