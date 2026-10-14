@@ -123,8 +123,13 @@ export function withConnectEnv(
   return { ...manifest, env: { ...manifest.env, allow: [...manifest.env.allow, ...added] } };
 }
 
-/** What the registry said when asked about a slug outside a connect. */
+/**
+ * What is known about a slug's trust tier outside a connect: what its live
+ * connection was given, else what the registry said.
+ */
 export type TrustLookup =
+  /** The tier and registry record (null if none) the live connection's connect used. */
+  | { status: "connection"; trustTier: TrustTier; server: RegistryServer | null }
   | { status: "found"; server: RegistryServer; trustTier: TrustTier }
   /** Not a registry slug: what connects by command or URL produce. */
   | { status: "not-found" }
@@ -144,29 +149,31 @@ export interface ManifestChanges {
 /** What an override was built on, so mcp_sandbox can tell the user. */
 export type OverrideStart =
   | { from: "override" }
-  | { from: "connection" }
   | { from: "defaults"; trustTier: TrustTier; lookup: TrustLookup["status"] };
 
 /**
- * The override mcp_sandbox "set" saves: `changes` applied to what the server
- * would otherwise run with. That is its saved override, else the manifest its
- * live connection resolved, else what a connect would resolve — the defaults
- * for its trust tier. (A fixed l1-process baseline used to stand in for the
- * last, so changing only the network also dropped the container and the
- * server's declared env vars.)
+ * The override mcp_sandbox "set" saves: `changes` applied to what the server's
+ * next connect would otherwise resolve. That is its saved override, else the
+ * defaults for its trust tier, declared env vars included. (A fixed
+ * l1-process baseline used to stand in for the defaults, so changing only the
+ * network also dropped the container and the declared env vars.)
  *
- * The tier comes from `lookup`, which the caller needs to make only when
- * there is neither a saved override nor a live manifest. A slug the registry
- * doesn't have gets "unknown", as a connect by command or URL does; so does
- * one it couldn't be asked about, since the most locked-down tier is the only
- * honest guess.
+ * A live connection only says which tier and registry record those defaults
+ * come from. Its own manifest is no base: it adds the env names passed to that
+ * connect (withConnectEnv), which an override would keep allowing on every
+ * later connect, from the gateway's environment; it may run as l1-process for
+ * want of a container engine; and it may come from an override since reset.
+ *
+ * Otherwise the tier comes from the registry. A slug it doesn't have gets
+ * "unknown", as a connect by command or URL does; so does one it couldn't be
+ * asked about, since the most locked-down tier is the only honest guess. The
+ * caller needs `lookup` only when there is no saved override.
  */
 export function overrideForSet(
   slug: string,
   changes: ManifestChanges,
   current: {
     saved?: CapabilityManifest;
-    live?: CapabilityManifest;
     lookup?: TrustLookup;
   },
   containerIsolation: boolean,
@@ -176,16 +183,13 @@ export function overrideForSet(
   if (current.saved) {
     base = current.saved;
     start = { from: "override" };
-  } else if (current.live) {
-    base = current.live;
-    start = { from: "connection" };
   } else {
     const lookup: TrustLookup = current.lookup ?? { status: "unreachable" };
-    const found = lookup.status === "found" ? lookup : null;
-    const trustTier = found?.trustTier ?? "unknown";
+    const known = lookup.status === "found" || lookup.status === "connection" ? lookup : null;
+    const trustTier = known?.trustTier ?? "unknown";
     base = tierDefaults(slug, trustTier, {
       containerIsolation,
-      registryServer: found?.server,
+      registryServer: known?.server,
     });
     start = { from: "defaults", trustTier, lookup: lookup.status };
   }

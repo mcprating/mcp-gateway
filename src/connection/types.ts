@@ -1,6 +1,6 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type { TrustTier } from "../registry/types.js";
+import type { RegistryServer, TrustTier } from "../registry/types.js";
 import type { CapabilityManifest } from "../sandbox/types.js";
 import type { EgressProxy } from "../sandbox/egress-proxy.js";
 import type { TrustFacts } from "../registry/trust-facts.js";
@@ -81,13 +81,27 @@ export interface DownstreamConnection {
   connectedAt: Date;
   lastError?: string;
   trustTier: TrustTier;
+  /**
+   * The registry record the connect looked the server up by, or null for one
+   * connected by command or bare URL (whose trustTier comes from what MCP
+   * Rating knows of the package it runs). With trustTier, it gives the
+   * defaults the server gets without an override (tierDefaults), which
+   * mcp_sandbox "set" builds on.
+   */
+  registryServer: RegistryServer | null;
   serverInfo?: { name: string; version: string };
 
   /** What MCP Rating knew about it when it was connected. */
   trust?: TrustFacts;
 
-  /** Resolved sandbox capability manifest (L1+) for this connection */
+  /** Sandbox capability manifest (L1+) this connection runs under: what is enforced */
   manifest?: CapabilityManifest;
+  /**
+   * The manifest the connect resolved, when it couldn't run it: l2-container
+   * with no Docker or Podman to start one, so `manifest` records the
+   * l1-process it fell back to. mcp_sandbox view and the set reply say so.
+   */
+  resolvedManifest?: CapabilityManifest;
 
   /** Egress allowlist proxy (L2 network:allowlist mode) — stopped on disconnect */
   egressProxy?: EgressProxy;
