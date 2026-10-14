@@ -6,6 +6,7 @@ import {
   ManifestResolver,
   containmentRemedy,
   overrideForSet,
+  overrideSlug,
   tierDefaults,
   withConnectEnv,
   type ContainmentRemedy,
@@ -326,6 +327,39 @@ describe("ManifestResolver.summarize", () => {
   it("gives a contained server no hint", () => {
     for (const r of ["start-engine", "enable-isolation", "set-enforcement"] as const) {
       expect(files(manifest(), r)).toBe("Files: 1 read path(s), 0 write path(s) mounted; nothing else from the host");
+    }
+  });
+});
+
+/**
+ * A connect by registry name knows the server by the registry's slug for it,
+ * and looks its override up under that. mcp_sandbox used to file an override
+ * under whatever it was passed, so one set by name was never applied.
+ */
+describe("overrideSlug", () => {
+  const NAMED = { ...GITHUB, slug: "io-github-acme-github" } as RegistryServer;
+
+  it("files an override set by registry name under the slug a connect by that name uses", () => {
+    expect(
+      overrideSlug("io.github.acme/github", { status: "found", server: NAMED, trustTier: "community" }),
+    ).toEqual({ slug: "io-github-acme-github" });
+  });
+
+  it("uses anything without a \"/\" as given, with no lookup", () => {
+    expect(overrideSlug("npx-some-server")).toEqual({ slug: "npx-some-server" });
+    expect(overrideSlug("github", { status: "not-found" })).toEqual({ slug: "github" });
+  });
+
+  it("refuses a name no registry has, since no connect would use the override", () => {
+    const r = overrideSlug("io.github.nobody/none", { status: "not-found" });
+    expect(r).toEqual({ error: expect.stringContaining('No registry has a server named "io.github.nobody/none"') });
+  });
+
+  it("refuses a name it couldn't look up rather than guess its slug", () => {
+    for (const byName of [{ status: "unreachable" } as const, undefined]) {
+      expect(overrideSlug("io.github.acme/github", byName)).toEqual({
+        error: expect.stringContaining("No registry answered"),
+      });
     }
   });
 });

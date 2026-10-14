@@ -31,7 +31,9 @@ function setup(opts: {
   registryServer?: unknown;
   /** MCP_GATEWAY_CONTAINER_ISOLATION; on unless a test says otherwise. */
   containerIsolation?: boolean;
-  getServer?: () => Promise<unknown>;
+  /** The slug the saved override and the live connection are filed under. */
+  at?: string;
+  getServer?: (ref: string) => Promise<unknown>;
 }) {
   let handler!: Handler;
   const server = {
@@ -39,18 +41,21 @@ function setup(opts: {
       handler = h;
     },
   };
+  const at = opts.at ?? "srv";
   const saveOverride = vi.fn<(m: CapabilityManifest) => void>();
+  const clearOverride = vi.fn<(slug: string) => void>();
   const getServer = vi.fn(opts.getServer ?? (async () => null));
   registerSandbox(
     server as never,
     {
       manifestResolver: {
-        getOverride: () => opts.saved,
+        getOverride: (slug: string) => (slug === at ? opts.saved : undefined),
         saveOverride,
+        clearOverride,
         containerIsolation: opts.containerIsolation ?? true,
       },
-      getConnection: () =>
-        opts.live
+      getConnection: (slug: string) =>
+        opts.live && slug === at
           ? {
               manifest: opts.live,
               resolvedManifest: opts.resolved,
@@ -66,8 +71,8 @@ function setup(opts: {
     expect(res.isError).toBeFalsy();
     return { text: res.content[0].text, saved: saveOverride.mock.calls[0]?.[0] };
   };
-  const view = async () => (await handler({ action: "view", slug: "srv" })).content[0].text;
-  return { set, view, getServer };
+  const view = async (slug = "srv") => (await handler({ action: "view", slug })).content[0].text;
+  return { set, view, call: handler, getServer, saveOverride, clearOverride };
 }
 
 const CONTAINED: CapabilityManifest = {
@@ -197,5 +202,59 @@ describe("mcp_sandbox view", () => {
   it("suggests the isolation setting where it is off and would contain the server", async () => {
     const { view } = setup({ live: ON_HOST, trustTier: "community", containerIsolation: false });
     expect(await view()).toContain("(set MCP_GATEWAY_CONTAINER_ISOLATION=true to restrict)");
+  });
+});
+
+/**
+ * A connect by registry name knows the server by the registry's slug for it.
+ * mcp_sandbox used to file overrides under whatever it was passed, so one set
+ * by name sat under the name, and the connect never found it.
+ */
+describe("mcp_sandbox with a registry name", () => {
+  const NAME = "io.github.acme/srv";
+  const SLUG = "io-github-acme-srv";
+  const byName = async (ref: string) => (ref === NAME ? { ...GITHUB_RECORD, slug: SLUG, name: NAME } : null);
+
+  it("files the override under the slug a connect by that name uses, with that server's tier", async () => {
+    const { set, getServer } = setup({ getServer: byName });
+    const { text, saved } = await set({ ...REGISTRY_ONLY, slug: NAME });
+    expect(saved).toMatchObject({ slug: SLUG, enforcement: "l2-container", env: { allow: ["GITHUB_TOKEN"] } });
+    // Looked up once, by name: another registry's server can't be found by its slug.
+    expect(getServer.mock.calls).toEqual([[NAME]]);
+    expect(text).toContain(`\`${NAME}\` is known here by its slug, \`${SLUG}\``);
+    expect(text).toContain("`community` trust tier");
+  });
+
+  it("finds a connection made by that name, under its slug", async () => {
+    const { view } = setup({ getServer: byName, live: ON_HOST, at: SLUG });
+    const text = await view(NAME);
+    expect(text).toContain(`## 🛡️ Sandbox: \`${SLUG}\` (active connection)`);
+    expect(text).toContain("**Enforcement:** l1-process");
+  });
+
+  it("resets the override filed under the slug", async () => {
+    const { call, clearOverride } = setup({ getServer: byName });
+    await call({ action: "reset", slug: NAME });
+    expect(clearOverride).toHaveBeenCalledWith(SLUG);
+  });
+
+  it("refuses a name no registry has, and saves nothing", async () => {
+    const { call, saveOverride } = setup({ getServer: byName });
+    const res = await call({ ...REGISTRY_ONLY, slug: "io.github.nobody/none" });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain('No registry has a server named "io.github.nobody/none"');
+    expect(saveOverride).not.toHaveBeenCalled();
+  });
+
+  it("refuses a name when no registry answers, rather than guess its slug", async () => {
+    const { call, saveOverride } = setup({
+      getServer: async () => {
+        throw new Error("No registry answered");
+      },
+    });
+    const res = await call({ ...REGISTRY_ONLY, slug: NAME });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain("No registry answered: try again, or pass the slug");
+    expect(saveOverride).not.toHaveBeenCalled();
   });
 });

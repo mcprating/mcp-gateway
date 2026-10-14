@@ -163,6 +163,34 @@ export type TrustLookup =
   | { status: "not-found" }
   | { status: "unreachable" };
 
+/**
+ * The slug mcp_sandbox files a server's override under: the one a connect
+ * gives it. A registry name (`io.github.owner/server`: anything with a "/")
+ * becomes the slug of the server the registry has under it, as connect does,
+ * since a name's "/" and "." can't go into tool names. Anything else is used
+ * as given. An override filed under the name itself was never applied: a
+ * connect by name looks overrides up by that slug.
+ *
+ * `byName` is the registry's answer for a name, and is needed only for one.
+ * A name it doesn't know, or couldn't be asked about, gets no slug: no
+ * connect would ever use an override filed under a guess.
+ */
+export function overrideSlug(
+  ref: string,
+  byName?: TrustLookup,
+): { slug: string } | { error: string } {
+  if (!ref.includes("/")) return { slug: ref };
+  if (byName?.status === "found") return { slug: byName.server.slug };
+  if (byName?.status === "not-found") {
+    return {
+      error: `No registry has a server named "${ref}", so no connect would use an override for it: a connect by that name fails. Check the name with mcp_discover, or pass the server's slug.`,
+    };
+  }
+  return {
+    error: `"${ref}" is a registry name, and an override is saved under the slug a connect gives the server, which takes a registry to find. No registry answered: try again, or pass the slug (mcp_list_active shows it once the server is connected).`,
+  };
+}
+
 /** The fields mcp_sandbox "set" changes. One left out keeps its current value. */
 export interface ManifestChanges {
   enforcement?: EnforcementLevel;
