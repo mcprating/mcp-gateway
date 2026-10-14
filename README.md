@@ -255,7 +255,50 @@ Every connected server is labeled with a trust tier based on its MCP-Rating qual
 - **[Verified]** — High quality + officially verified
 - **[Trusted]** — Good quality with repository and install command
 - **[Community]** — Listed in registry with basic quality
-- **[Unverified]** — Unknown origin (manually connected)
+- **[Unverified]** — Unknown origin (manually connected), or from another registry that MCP Rating hasn't rated
+
+## Registries
+
+By default the gateway searches MCP Rating. It can search any registry that
+speaks the [official MCP Registry API](https://registry.modelcontextprotocol.io/docs)
+(v0.1) instead, or as well: the official registry, a company's own registry, or
+MCP Rating's mirror of it.
+
+```json
+{
+  "mcpServers": {
+    "gateway": {
+      "command": "npx",
+      "args": ["-y", "@mcp-rating/gateway"],
+      "env": {
+        "MCP_GATEWAY_REGISTRIES": "https://mcprating.io/api/v1,https://registry.acme.internal"
+      }
+    }
+  }
+}
+```
+
+- **The list replaces the default.** Leave MCP Rating out and the gateway never
+  contacts it for discovery.
+- **Each entry is a URL.** One ending in `/api/v1` is taken as MCP Rating's own
+  API, and anything else as the MCP Registry API. To say which explicitly, write
+  `mcprating=URL` or `mcp-registry=URL`.
+- **Searches go to every registry and are merged.** A server two registries both
+  list appears once, as the first-listed registry has it. A search waits up to
+  15 seconds; a registry that hasn't answered by then is named in the results,
+  and the rest are shown.
+- **Connecting by name.** A server from an MCP Registry API registry connects by
+  its registry name, `mcp_connect({slug: "io.github.owner/server"})`. That works
+  in any later session too.
+- **Scores come from MCP Rating only.** Quality scores, safety flags and start
+  tests are MCP Rating's. A server from another registry shows as *unrated* and
+  [Unverified], so connecting it asks for confirmation. Numbers another registry
+  puts in its own entries (`_meta`) are not read: anyone can write them.
+- **The partner key goes to MCP Rating only**, never to another registry.
+
+The official registry's search matches server names only and was slow when this
+was written (7–40 s per search on 2026-10-14). The gateway asks it for the
+query's longest word and ranks what comes back by how many of your words match.
 
 ## Configuration
 
@@ -275,6 +318,7 @@ The gateway reads config from `~/.mcp-gateway/config.json`:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `MCP_GATEWAY_REGISTRY_URL` | MCP-Rating API base URL | `https://mcprating.io/api/v1` |
+| `MCP_GATEWAY_REGISTRIES` | Comma-separated registries to search instead (see [Registries](#registries)) | MCP Rating alone |
 | `MCP_GATEWAY_TIMEOUT` | Proxy timeout (ms) | `30000` |
 | `MCP_GATEWAY_MAX_CONNECTIONS` | Max simultaneous connections | `10` |
 | `MCP_GATEWAY_LOG_LEVEL` | Log level (debug/info/warn/error) | `info` |
@@ -401,8 +445,10 @@ If a partner key is set (you are earning attribution revenue), connect and
 tool-execution events are sent to mcprating.io. Disable it while keeping the key
 with `MCP_GATEWAY_AD_TRACKING=false`.
 
-Separately, the gateway calls the MCP-Rating registry API for `mcp_discover` and
-`mcp_recommend` — that is the lookup you asked for, not background reporting.
+Separately, the gateway calls the configured registries — MCP Rating unless you
+set `MCP_GATEWAY_REGISTRIES` — for `mcp_discover`, `mcp_connect` and
+`mcp_recommend`. That is the lookup you asked for, not background reporting, and
+each registry you list sees the searches.
 Usage analytics (`mcp_usage`) are an in-memory ring buffer and never leave the
 process.
 

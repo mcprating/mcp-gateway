@@ -10,7 +10,7 @@ export function registerDiscover(
 ): void {
   server.tool(
     "mcp_discover",
-    "Search the MCP-Rating registry for MCP servers. Returns servers with quality scores, trust tiers, and install information. Use this to find servers before connecting them with mcp_connect.",
+    "Search the configured MCP registries (MCP Rating by default) for MCP servers. Returns servers with trust tiers, install information, and MCP Rating's quality scores where it has rated them. Use this to find servers before connecting them with mcp_connect.",
     {
       query: z.string().describe("Search query (server name, description, or capability)"),
       category: z.string().optional().describe("Filter by category slug (e.g., 'developer-tools', 'data-databases')"),
@@ -57,13 +57,21 @@ export function registerDiscover(
           `## MCP Server Search: "${query}"`,
           `Found ${result.total} servers (showing ${ranked.length}; ones the gateway can start now are listed first)\n`,
         ];
+        if (result.unreachable?.length) {
+          lines.push(`⚠️ No answer from ${result.unreachable.join(", ")}; these results are from the other registries.\n`);
+        }
+        // Name each result's registry only when there is more than one to tell apart.
+        const manyRegistries = registryClient.registries.length > 1;
 
         for (const { server, ready } of ranked) {
           const tier = (
             await import("../registry/registry-client.js")
           ).RegistryClient.determineTrustTier(server);
           const tierLabel = TRUST_LABELS[tier];
-          const score = server.qualityScore ?? 0;
+          // A server from another registry has no score: say so, not "0/100".
+          const score = server.qualityScore === null || server.qualityScore === undefined
+            ? "unrated"
+            : `${server.qualityScore}/100`;
           const stars = server.stars ? `${server.stars.toLocaleString()} ★` : "";
           const downloads = server.weeklyDownloads
             ? `${server.weeklyDownloads.toLocaleString()}/wk`
@@ -102,7 +110,8 @@ export function registerDiscover(
 
           lines.push(
             `### ${server.name}`,
-            `**Slug:** \`${server.slug}\` · **Score:** ${score}/100 · **Trust:** [${tierLabel}]`,
+            `**Slug:** \`${server.slug}\` · **Score:** ${score} · **Trust:** [${tierLabel}]` +
+              (manyRegistries && server.source ? ` · **Registry:** ${server.source}` : ""),
             server.description || "_No description_",
             stats ? `📊 ${stats}` : "",
           );
@@ -152,7 +161,7 @@ export function registerDiscover(
           }
 
           if (ready.level !== "not-runnable") {
-            lines.push(`→ Connect: \`mcp_connect({slug: "${server.slug}"})\``);
+            lines.push(`→ Connect: \`mcp_connect({slug: "${server.ref ?? server.slug}"})\``);
           }
 
           lines.push("");

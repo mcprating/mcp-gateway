@@ -162,6 +162,8 @@ export class ConnectionManager {
           const server = await this.registryClient.getServer(params.slug);
           if (server) {
             registryServer = server;
+            // A registry name given as the slug: use the registry's tool-name-safe one.
+            if (params.slug.includes("/")) slug = server.slug;
             displayName = server.name || slug;
             trustTier = (
               await import("../registry/registry-client.js")
@@ -172,17 +174,21 @@ export class ConnectionManager {
         }
       }
     } else if (params.slug) {
-      // Registry-based connection
-      slug = params.slug;
-      const server = await this.registryClient.getServer(slug);
+      // Registry-based connection: by slug, or by official registry name
+      // (io.github.owner/server) from any configured registry.
+      const server = await this.registryClient.getServer(params.slug);
 
       if (!server) {
+        const where = this.registryClient.registries.map((r) => r.label).join(", ");
         throw new ConnectionError(
-          `Server "${slug}" not found in MCP-Rating registry.`,
-          slug,
+          `Server "${params.slug}" not found in ${where}.`,
+          params.slug,
         );
       }
 
+      // Known by the registry's slug: a registry name's "/" and "." can't go
+      // into a proxied tool name (slug__tool).
+      slug = server.slug;
       registryServer = server;
       displayName = server.name || slug;
 

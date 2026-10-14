@@ -81,11 +81,7 @@ export async function runHttpDaemon(
 
   // Process-wide shared singleton: the registry cache holds public, read-only
   // data, so all tenants safely share one warm cache.
-  const registryClient = new RegistryClient(
-    config.registryApiUrl,
-    config.registryCacheTtlMs,
-    config.partnerKey,
-  );
+  const registryClient = RegistryClient.fromConfig(config);
 
   // Sandbox manifests are tenant-private — one tenant must not see or alter
   // another's sandbox config. Each tenant gets its own resolver + file,

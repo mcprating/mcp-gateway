@@ -1,24 +1,18 @@
 import { log } from "../utils/logger.js";
 import { RegistryError } from "../utils/errors.js";
 import { isCommandAvailable } from "../connection/auto-installer.js";
-import { USER_AGENT } from "../version.js";
+import type { GatewayConfig, RegistryConfig } from "../config/types.js";
 import type {
   RegistryServer,
   RegistryListResponse,
   InstallCommand,
   TrustTier,
 } from "./types.js";
+import type { RegistrySource, RegistryStatus, SearchOptions } from "./sources/http-source.js";
+import { McpRatingSource } from "./sources/mcprating-source.js";
+import { McpRegistrySource } from "./sources/mcp-registry-source.js";
 
-interface CacheEntry<T> {
-  data: T;
-  expiresAt: number;
-}
-
-export interface RegistryStatus {
-  lastSuccessfulCall: Date | null;
-  lastError: string | null;
-  cacheSize: number;
-}
+export type { RegistryStatus } from "./sources/http-source.js";
 
 /**
  * PATH lookup, memoised per launcher for a minute. mcp_discover checks every
@@ -65,108 +59,134 @@ export interface Readiness {
   verified: boolean;
 }
 
+
 /**
- * HTTP client for querying the MCP-Rating API.
+ * Every name a row stands for, so one server found in two registries is listed
+ * once: its official registry names (MCP Rating lists an official entry under
+ * its npm row and keeps the names in metadata.group.registryNames) and its npm
+ * package.
+ */
+function identities(s: RegistryServer): string[] {
+  const names = [
+    s.registryName,
+    s.metadata?.registryName,
+    ...(((s.metadata?.group as { registryNames?: unknown } | undefined)?.registryNames as unknown[]) ?? []),
+  ].filter((n): n is string => typeof n === "string" && n.length > 0);
+  const keys = names.map((n) => `name:${n.toLowerCase()}`);
+  if (s.npmPackage) keys.push(`npm:${s.npmPackage.toLowerCase()}`);
+  return keys.length > 0 ? keys : [`row:${s.source ?? ""}#${s.slug}`];
+}
+
+/**
+ * The registries the gateway reads, as one: MCP Rating by default, or any list
+ * of registries that speak the MCP Rating API or the official MCP Registry API
+ * (MCP_GATEWAY_REGISTRIES). Searches go to all of them and are merged, the
+ * first-listed registry's copy of a server winning; lookups try them in order.
  *
- * Uses native fetch (Node 18+). Falls back gracefully when the
- * registry is unreachable — users can still connect servers manually
- * via explicit command+args.
- *
- * Features:
- * - In-memory cache with configurable TTL
- * - Automatic retry with backoff for transient failures (5xx / network)
- * - Reachability tracking for health diagnostics
+ * Falls back gracefully when a registry is unreachable — the others still
+ * answer, and users can always connect servers manually via command + args.
  */
 export class RegistryClient {
-  private cache = new Map<string, CacheEntry<unknown>>();
-  private _lastSuccessfulCall: Date | null = null;
-  private _lastError: string | null = null;
+  private readonly sources: RegistrySource[];
+  /**
+   * How long a search waits for the registries. One that hasn't answered by
+   * then is reported as unreachable for this search; its answer still lands in
+   * its cache, so the same search again is quick.
+   */
+  searchDeadlineMs = 15_000;
 
-  constructor(
-    private readonly baseUrl: string,
-    private readonly cacheTtlMs: number = 300_000,
-    private readonly partnerKey?: string,
-  ) {}
-
-  async search(
-    query: string,
-    options?: { category?: string; limit?: number; offset?: number },
-  ): Promise<RegistryListResponse> {
-    const params = new URLSearchParams({
-      search: query,
-      limit: String(options?.limit ?? 10),
-      offset: String(options?.offset ?? 0),
-    });
-    if (options?.category) {
-      params.set("category", options.category);
-    }
-
-    const url = `${this.baseUrl}/servers?${params}`;
-    const cacheKey = `search:${url}`;
-
-    const cached = this.getFromCache<RegistryListResponse>(cacheKey);
-    if (cached) {
-      log.debug("Registry cache hit", { cacheKey });
-      return cached;
-    }
-
-    log.debug("Registry search", { url });
-
-    try {
-      const res = await this.fetchWithRetry(url);
-      if (!res.ok) {
-        throw new RegistryError(
-          `Registry API returned ${res.status}: ${res.statusText}`,
-        );
-      }
-      const data = (await res.json()) as RegistryListResponse;
-      this.setCache(cacheKey, data);
-      this.recordSuccess();
-      return data;
-    } catch (err) {
-      this.recordError(err);
-      if (err instanceof RegistryError) throw err;
-      throw new RegistryError(
-        `Failed to reach MCP-Rating registry at ${this.baseUrl}: ${String(err)}`,
-      );
-    }
+  /** A list of sources, or (as before) one MCP Rating API URL. */
+  constructor(sources: RegistrySource[] | string, cacheTtlMs = 300_000, partnerKey?: string) {
+    this.sources = typeof sources === "string" ? [new McpRatingSource(sources, cacheTtlMs, partnerKey)] : sources;
+    if (this.sources.length === 0) throw new Error("RegistryClient needs at least one registry");
   }
 
-  async getServer(slug: string): Promise<RegistryServer | null> {
-    const url = `${this.baseUrl}/servers/${encodeURIComponent(slug)}`;
-    const cacheKey = `server:${slug}`;
+  static fromConfig(
+    config: Pick<GatewayConfig, "registryApiUrl" | "registries" | "registryCacheTtlMs" | "partnerKey">,
+  ): RegistryClient {
+    const list: RegistryConfig[] = config.registries?.length
+      ? config.registries
+      : [{ type: "mcprating", url: config.registryApiUrl }];
+    return new RegistryClient(
+      list.map((r) =>
+        r.type === "mcprating"
+          ? new McpRatingSource(r.url, config.registryCacheTtlMs, config.partnerKey)
+          : new McpRegistrySource(r.url, config.registryCacheTtlMs),
+      ),
+    );
+  }
 
-    const cached = this.getFromCache<RegistryServer | null>(cacheKey);
-    if (cached !== undefined) {
-      log.debug("Registry cache hit", { cacheKey });
-      return cached;
+  /** The configured registries, in order. */
+  get registries(): Array<{ label: string; kind: RegistrySource["kind"] }> {
+    return this.sources.map((s) => ({ label: s.label, kind: s.kind }));
+  }
+
+  /**
+   * Search every registry and merge: each registry's results in its own order,
+   * taken in turns so a second registry isn't buried behind the first's whole
+   * list, and a server already listed by an earlier registry skipped. Fails
+   * only when no registry answers; `unreachable` names the ones that didn't.
+   */
+  async search(query: string, options?: SearchOptions): Promise<RegistryListResponse> {
+    const settled = await Promise.allSettled(
+      this.sources.map((s) => withDeadline(s.search(query, options), this.searchDeadlineMs)),
+    );
+    const answered = settled.flatMap((r, i) => (r.status === "fulfilled" ? [r.value] : []));
+    const unreachable = settled.flatMap((r, i) => {
+      if (r.status === "fulfilled") return [];
+      log.warn("Registry search failed", { registry: this.sources[i].label, error: String(r.reason) });
+      return [this.sources[i].label];
+    });
+    if (answered.length === 0) {
+      const why = settled.map((r, i) => `${this.sources[i].label}: ${reason(r)}`).join("; ");
+      throw new RegistryError(`No registry answered (${why})`);
     }
 
-    log.debug("Registry getServer", { url });
-
-    try {
-      const res = await this.fetchWithRetry(url);
-      if (res.status === 404) {
-        this.setCache(cacheKey, null);
-        this.recordSuccess();
-        return null;
+    const seen = new Set<string>();
+    const data: RegistryServer[] = [];
+    const longest = Math.max(...answered.map((r) => r.data.length));
+    for (let i = 0; i < longest; i++) {
+      for (const result of answered) {
+        const s = result.data[i];
+        if (!s) continue;
+        const keys = identities(s);
+        if (keys.some((k) => seen.has(k))) continue;
+        for (const k of keys) seen.add(k);
+        data.push(s);
       }
-      if (!res.ok) {
-        throw new RegistryError(
-          `Registry API returned ${res.status}: ${res.statusText}`,
-        );
-      }
-      const data = (await res.json()) as RegistryServer;
-      this.setCache(cacheKey, data);
-      this.recordSuccess();
-      return data;
-    } catch (err) {
-      this.recordError(err);
-      if (err instanceof RegistryError) throw err;
-      throw new RegistryError(
-        `Failed to reach MCP-Rating registry: ${String(err)}`,
-      );
     }
+    return {
+      data,
+      total: answered.reduce((n, r) => n + (r.total ?? r.data.length), 0),
+      limit: options?.limit ?? 10,
+      offset: options?.offset ?? 0,
+      ...(unreachable.length ? { unreachable } : {}),
+    };
+  }
+
+  /**
+   * A server by slug, or by official registry name (`io.github.owner/server`),
+   * from the first registry that has it. Null when none does; throws only when
+   * none could be asked.
+   */
+  async getServer(ref: string): Promise<RegistryServer | null> {
+    const byName = ref.includes("/");
+    let lastError: unknown;
+    let answered = false;
+    for (const s of this.sources) {
+      try {
+        const hit = byName ? await s.getByName(ref) : await s.getServer(ref);
+        answered = true;
+        if (hit) return hit;
+      } catch (err) {
+        lastError = err;
+        log.warn("Registry lookup failed", { registry: s.label, ref, error: String(err) });
+      }
+    }
+    if (!answered) {
+      throw new RegistryError(`No registry answered for "${ref}": ${String((lastError as Error)?.message ?? lastError)}`);
+    }
+    return null;
   }
 
   /**
@@ -283,91 +303,44 @@ export class RegistryClient {
     return "unknown";
   }
 
-  /** Get reachability status for diagnostics. */
-  getStatus(): RegistryStatus {
+  /** Reachability across all registries, and of each, for diagnostics. */
+  getStatus(): RegistryStatus & { registries: Array<{ label: string; kind: RegistrySource["kind"] } & RegistryStatus> } {
+    const each = this.sources.map((s) => ({ label: s.label, kind: s.kind, ...s.getStatus() }));
+    const successes = each.map((e) => e.lastSuccessfulCall?.getTime() ?? 0);
+    const latest = Math.max(...successes);
     return {
-      lastSuccessfulCall: this._lastSuccessfulCall,
-      lastError: this._lastError,
-      cacheSize: this.cache.size,
+      lastSuccessfulCall: latest > 0 ? new Date(latest) : null,
+      lastError: each.filter((e) => e.lastError).map((e) => `${e.label}: ${e.lastError}`).join("; ") || null,
+      cacheSize: each.reduce((n, e) => n + e.cacheSize, 0),
+      registries: each,
     };
   }
 
   /** Clear all cached entries. */
   clearCache(): void {
-    this.cache.clear();
-    log.debug("Registry cache cleared");
+    for (const s of this.sources) s.clearCache();
   }
+}
 
-  // ── Cache helpers ──────────────────────────────────────────────
+/** `p`, or a rejection once `ms` have passed. `p` itself carries on (and caches what it gets). */
+function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`no answer within ${ms / 1000}s`)), ms);
+    timer.unref?.();
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
 
-  private getFromCache<T>(key: string): T | undefined {
-    const entry = this.cache.get(key) as CacheEntry<T> | undefined;
-    if (!entry) return undefined;
-    if (Date.now() > entry.expiresAt) {
-      this.cache.delete(key);
-      return undefined;
-    }
-    return entry.data;
-  }
-
-  private setCache<T>(key: string, data: T): void {
-    this.cache.set(key, {
-      data,
-      expiresAt: Date.now() + this.cacheTtlMs,
-    });
-  }
-
-  // ── Retry helper ───────────────────────────────────────────────
-
-  private async fetchWithRetry(url: string, maxRetries = 2): Promise<Response> {
-    const headers: Record<string, string> = { "User-Agent": USER_AGENT };
-    if (this.partnerKey) {
-      headers["x-partner-key"] = this.partnerKey;
-    }
-
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        const res = await fetch(url, {
-          headers,
-          signal: AbortSignal.timeout(10_000),
-        });
-        // Don't retry on client errors (4xx) or success
-        if (res.ok || res.status < 500) return res;
-        // 5xx — retry if attempts remain
-        lastError = new Error(`HTTP ${res.status}: ${res.statusText}`);
-        log.warn("Registry returned 5xx, retrying", {
-          url,
-          status: res.status,
-          attempt: attempt + 1,
-          maxRetries,
-        });
-      } catch (err) {
-        lastError = err;
-        if (attempt < maxRetries) {
-          log.warn("Registry fetch failed, retrying", {
-            url,
-            error: String(err),
-            attempt: attempt + 1,
-            maxRetries,
-          });
-        }
-      }
-      if (attempt < maxRetries) {
-        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
-      }
-    }
-    throw lastError;
-  }
-
-  // ── Reachability tracking ──────────────────────────────────────
-
-  private recordSuccess(): void {
-    this._lastSuccessfulCall = new Date();
-    this._lastError = null;
-  }
-
-  private recordError(err: unknown): void {
-    this._lastError = err instanceof Error ? err.message : String(err);
-  }
+function reason(r: PromiseSettledResult<unknown>): string {
+  if (r.status === "fulfilled") return "ok";
+  return r.reason instanceof Error ? r.reason.message : String(r.reason);
 }

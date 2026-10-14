@@ -14,7 +14,7 @@ async function main() {
   // server that many MCP clients can connect to. Otherwise, classic stdio.
   if (config.httpPort) {
     log.info("Starting MCP Gateway (HTTP daemon mode)", {
-      registryApiUrl: config.registryApiUrl,
+      registries: (config.registries ?? [{ type: "mcprating", url: config.registryApiUrl }]).map((r) => `${r.type}=${r.url}`),
       port: config.httpPort,
       host: config.httpHost,
     });
@@ -39,7 +39,7 @@ async function main() {
   }
 
   log.info("Starting MCP Gateway", {
-    registryApiUrl: config.registryApiUrl,
+    registries: (config.registries ?? [{ type: "mcprating", url: config.registryApiUrl }]).map((r) => `${r.type}=${r.url}`),
     maxConnections: config.maxConnections,
   });
 

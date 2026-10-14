@@ -1,7 +1,7 @@
 import { readFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { GatewayConfig } from "./types.js";
+import type { GatewayConfig, RegistryConfig } from "./types.js";
 
 const GATEWAY_DIR = join(homedir(), ".mcp-gateway");
 const DEFAULT_CONFIG_PATH = join(GATEWAY_DIR, "config.json");
@@ -54,6 +54,11 @@ export function loadConfig(): GatewayConfig {
       process.env.MCP_GATEWAY_REGISTRY_URL ||
       fileConfig.registryApiUrl ||
       DEFAULTS.registryApiUrl,
+
+    registries:
+      parseRegistryList(parseCsvEnv("MCP_GATEWAY_REGISTRIES")) ??
+      parseRegistryList(fileConfig.registries as Array<string | RegistryConfig> | undefined) ??
+      undefined,
 
     proxyTimeoutMs: parseIntEnv("MCP_GATEWAY_TIMEOUT") ??
       fileConfig.proxyTimeoutMs ??
@@ -117,6 +122,46 @@ export function loadConfig(): GatewayConfig {
       fileConfig.httpAllowedOrigins ??
       undefined,
   };
+}
+
+/**
+ * Registries from MCP_GATEWAY_REGISTRIES or the config file's `registries`.
+ * Each is a URL, or `mcprating=URL` / `mcp-registry=URL` to say which API it
+ * speaks. A bare URL ending in /api/v1 is MCP Rating's API; anything else is
+ * taken to speak the official MCP Registry API (v0.1), as the official
+ * registry, MCP Rating's feed and spec-following private registries do.
+ * Entries that aren't http(s) URLs are dropped with a warning. Undefined when
+ * nothing usable is left, so the default (MCP Rating alone) applies.
+ */
+export function parseRegistryList(items: Array<string | RegistryConfig> | undefined): RegistryConfig[] | undefined {
+  if (!items?.length) return undefined;
+  const out: RegistryConfig[] = [];
+  for (const item of items) {
+    let type: RegistryConfig["type"] | undefined;
+    let url: string;
+    if (typeof item === "string") {
+      const m = item.trim().match(/^(mcprating|mcp-registry)=(.+)$/);
+      type = m?.[1] as RegistryConfig["type"] | undefined;
+      url = (m?.[2] ?? item).trim();
+    } else {
+      type = item?.type;
+      url = String(item?.url ?? "").trim();
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      process.stderr.write(`[mcp-gateway] ignoring registry "${url}": not a URL\n`);
+      continue;
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      process.stderr.write(`[mcp-gateway] ignoring registry "${url}": only http(s) registries are supported\n`);
+      continue;
+    }
+    const clean = url.replace(/\/+$/, "");
+    out.push({ type: type ?? (/\/api\/v1$/.test(clean) ? "mcprating" : "mcp-registry"), url: clean });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /**

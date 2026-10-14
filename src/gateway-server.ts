@@ -115,11 +115,7 @@ export function createGatewayServer(
   // Reuse a shared RegistryClient (warm cache) when provided, else create one.
   const registryClient =
     shared.registryClient ??
-    new RegistryClient(
-      config.registryApiUrl,
-      config.registryCacheTtlMs,
-      config.partnerKey,
-    );
+    RegistryClient.fromConfig(config);
   const permissionManager = new PermissionManager(config);
 
   // Create AdTracker if partner key is configured and tracking is not disabled
