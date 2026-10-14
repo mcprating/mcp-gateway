@@ -28,6 +28,7 @@ export function registerAudit(server: McpServer, auditLog: AuditLog): void {
           "tool_blocked",
           "egress_blocked",
           "egress_allowed",
+          "personal_data_requested",
           "disconnect",
         ])
         .optional()

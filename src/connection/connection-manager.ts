@@ -11,13 +11,14 @@ import {
   buildContainerCommand,
   resolveBakedImage,
 } from "../sandbox/container-runtime.js";
-import { EgressProxy } from "../sandbox/egress-proxy.js";
+import { EgressProxy, egressBindHost } from "../sandbox/egress-proxy.js";
 import type { AuditLog } from "../audit/audit-log.js";
 import type { UsageTracker } from "../analytics/usage-tracker.js";
 import type { PluginManager } from "../plugins/plugin-manager.js";
 import {
   registerProxiedTools,
   removeProxiedTools,
+  type ToolCallDeps,
 } from "../proxy/tool-router.js";
 import {
   registerProxiedResources,
@@ -88,6 +89,18 @@ export class ConnectionManager {
     private readonly config: GatewayConfig,
     private readonly adTracker?: AdTracker | null,
   ) {}
+
+  /** What a tool call outside the proxied tools (mcp_call_tool) goes through. */
+  get toolCallDeps(): ToolCallDeps {
+    return {
+      proxyTimeoutMs: this.config.proxyTimeoutMs,
+      permissionManager: this.permissionManager,
+      adTracker: this.adTracker,
+      usageTracker: this.usageTracker,
+      pluginManager: this.pluginManager,
+      auditLog: this.auditLog,
+    };
+  }
 
   /**
    * Connect to a downstream MCP server.
@@ -291,6 +304,7 @@ export class ConnectionManager {
 
     // Clean up failed connection if re-connecting
     if (existing?.state === "failed") {
+      await this.stopEgressProxy(existing);
       this.connections.delete(slug);
     }
 
@@ -325,6 +339,8 @@ export class ConnectionManager {
       let finalCommand = command;
       let finalArgs = args;
       let preScopedEnv: Record<string, string> | undefined;
+      // Values for names the container command forwards (the egress proxy URL).
+      let containerEnv: Record<string, string> = {};
 
       // Sandbox: resolve the capability manifest for stdio servers up front so
       // we know the enforcement level before deciding how to spawn.
@@ -350,7 +366,12 @@ export class ConnectionManager {
           // container's HTTP(S) traffic through it for host filtering.
           let egressProxyUrl: string | undefined;
           if (manifest.network.mode === "allowlist") {
-            const proxy = new EgressProxy(manifest.network.allow, slug, this.auditLog);
+            const proxy = new EgressProxy(
+              manifest.network.allow,
+              slug,
+              this.auditLog,
+              egressBindHost(engine, process.platform),
+            );
             await proxy.start();
             connection.egressProxy = proxy;
             egressProxyUrl = proxy.containerProxyUrl;
@@ -366,6 +387,7 @@ export class ConnectionManager {
           });
           finalCommand = wrapped.command;
           finalArgs = wrapped.args;
+          containerEnv = wrapped.env;
           log.info("Applied L2 container isolation", {
             slug,
             engine,
@@ -397,7 +419,7 @@ export class ConnectionManager {
       // child — the rest of process.env is withheld. For L2, the docker CLI
       // process receives this env and `-e NAME` forwards the allowed vars in.
       if (manifest) {
-        preScopedEnv = buildScopedEnvironment(manifest.env, params.env);
+        preScopedEnv = { ...buildScopedEnvironment(manifest.env, params.env), ...containerEnv };
         connection.manifest = manifest;
         log.info("Applied sandbox env scoping", {
           slug,
@@ -406,15 +428,19 @@ export class ConnectionManager {
         });
       }
 
-      // Connect via the appropriate transport
-      const result = await createTransport({
-        slug,
+      // Connect via the appropriate transport. The launch is kept so a
+      // reconnect after a crash starts exactly this again (attemptReconnect).
+      connection.launch = {
         transportType,
         command: finalCommand,
         args: finalArgs,
         env: params.env,
         preScopedEnv,
         url,
+      };
+      const result = await createTransport({
+        slug,
+        ...connection.launch,
         onClose: () => this.handleProcessCrash(slug),
         onToolsChanged: () => this.handleToolsChanged(slug),
         connectionTimeoutMs: this.config.proxyTimeoutMs,
@@ -528,7 +554,8 @@ export class ConnectionManager {
 
       return this.toSummary(connection);
     } catch (err) {
-      // Cleanup on failure
+      // Cleanup on failure — including the proxy, which would otherwise keep listening.
+      await this.stopEgressProxy(connection);
       this.connections.delete(slug);
       const msg = err instanceof Error ? err.message : String(err);
       throw new ConnectionError(
@@ -577,11 +604,7 @@ export class ConnectionManager {
       });
     }
 
-    // Stop the egress allowlist proxy if one was started for this connection.
-    if (connection.egressProxy) {
-      await connection.egressProxy.stop().catch(() => {});
-      connection.egressProxy = undefined;
-    }
+    await this.stopEgressProxy(connection);
 
     this.connections.delete(slug);
 
@@ -820,31 +843,35 @@ export class ConnectionManager {
   private async attemptReconnect(slug: string): Promise<void> {
     const connection = this.connections.get(slug);
     if (!connection || connection.state !== "reconnecting") return;
-    if (!connection.originalParams) return;
 
-    const params = connection.originalParams;
-    const transportType = params.transportType || connection.transportType || "stdio";
+    // Start exactly what the connect started — same container wrapper, same
+    // scoped environment. Without a recorded launch, fail rather than guess:
+    // a guess is how a sandboxed server used to come back on the host.
+    const launch = connection.launch;
+    if (!launch) {
+      connection.state = "failed";
+      connection.lastError = "Process exited and no launch was recorded to restart it with";
+      log.error("Cannot auto-reconnect — no recorded launch", { slug });
+      return;
+    }
 
     log.info("Attempting reconnect", {
       slug,
       attempt: connection.reconnectAttempts,
-      transportType,
+      transportType: launch.transportType,
     });
 
     try {
       const result = await createTransport({
         slug,
-        transportType,
-        command: params.command || "npx",
-        args: params.args || [],
-        env: params.env,
-        url: params.url,
+        ...launch,
         onClose: () => this.handleProcessCrash(slug),
         onToolsChanged: () => this.handleToolsChanged(slug),
         connectionTimeoutMs: this.config.proxyTimeoutMs,
       });
 
       // Reconnect succeeded
+      const attempt = connection.reconnectAttempts;
       connection.client = result.client;
       connection.transport = result.transport;
       connection.serverInfo = result.serverInfo;
@@ -896,6 +923,14 @@ export class ConnectionManager {
 
       this.mcpServer.sendToolListChanged();
 
+      // A restarted server is a new process: the audit trail should show it.
+      this.auditLog?.record({
+        type: "connect",
+        slug,
+        enforcement: connection.manifest?.enforcement ?? "none",
+        reason: `restarted after a crash (attempt ${attempt}) with the same launch`,
+      });
+
       log.info("Reconnect succeeded", {
         slug,
         toolCount: result.tools.length,
@@ -911,6 +946,13 @@ export class ConnectionManager {
       // Schedule next attempt
       this.scheduleReconnect(slug);
     }
+  }
+
+  /** Stop the egress allowlist proxy if one was started for this connection. */
+  private async stopEgressProxy(connection: DownstreamConnection): Promise<void> {
+    if (!connection.egressProxy) return;
+    await connection.egressProxy.stop().catch(() => {});
+    connection.egressProxy = undefined;
   }
 
   private cancelReconnect(slug: string): void {

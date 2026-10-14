@@ -135,7 +135,9 @@ export class AuditLog {
   } {
     const total = Object.values(this.counts).reduce((a, b) => a + b, 0);
     const securityEvents =
-      this.counts.tool_blocked + this.counts.egress_blocked;
+      this.counts.tool_blocked +
+      this.counts.egress_blocked +
+      this.counts.personal_data_requested;
     return { counts: { ...this.counts }, total, securityEvents };
   }
 }

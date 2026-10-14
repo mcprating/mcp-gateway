@@ -122,160 +122,220 @@ export function registerProxiedTools(
         // import here and we only need two fields — captured by the
         // UpstreamProgressContext interface.
         extra?: unknown,
-      ) => {
-        const startedAt = Date.now();
-
-        log.debug("Proxying tool call", {
-          nsName,
-          downstream: tool.name,
-          server: connection.slug,
-        });
-
-        // Run plugin beforeToolCall hooks
-        if (pluginManager) {
-          const ctx = {
-            slug: connection.slug,
-            toolName: tool.name,
-            args,
-            trustTier: connection.trustTier,
-          };
-          const modifiedCtx = await pluginManager.runBeforeToolCall(ctx);
-          if (modifiedCtx === null) {
-            // Plugin blocked the call
-            auditLog?.record({
-              type: "tool_blocked",
-              slug: connection.slug,
-              tool: tool.name,
-              enforcement: connection.manifest?.enforcement,
-              reason: "blocked by gateway plugin",
-            });
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: `Tool call blocked by gateway plugin.`,
-                },
-              ],
-              isError: true,
-            };
-          }
-          // Use potentially modified args
-          args = modifiedCtx.args;
-        }
-
-        // Forward progress notifications back to the upstream client
-        // using the upstream-supplied progress token (Bug A fix).
-        const onprogress = buildProgressForwarder(
-          extra as Parameters<typeof buildProgressForwarder>[0],
-          { slug: connection.slug, toolName: tool.name },
-        );
-
-        try {
-          const result = await connection.client.callTool(
-            { name: tool.name, arguments: args },
-            undefined,
-            {
-              signal: AbortSignal.timeout(proxyTimeoutMs),
-              ...(onprogress ? { onprogress } : {}),
-            },
-          );
-
-          const durationMs = Date.now() - startedAt;
-
-          // Track tool usage for ad attribution (fire-and-forget)
-          if (adTracker) {
-            adTracker.trackToolUsage(connection.slug, tool.name).catch(() => {});
-          }
-
-          // Track usage analytics
-          if (usageTracker) {
-            usageTracker.recordCall({
-              slug: connection.slug,
-              toolName: tool.name,
-              startedAt,
-              durationMs,
-              success: true,
-            });
-          }
-
-          // Safety audit: the tool ran under its sandbox enforcement level.
-          auditLog?.record({
-            type: "tool_call",
-            slug: connection.slug,
-            tool: tool.name,
-            enforcement: connection.manifest?.enforcement,
-            ok: true,
-          });
-
-          // Run plugin afterToolCall hooks
-          let finalResult = result as CallToolResult;
-          if (pluginManager) {
-            finalResult = await pluginManager.runAfterToolCall(
-              {
-                slug: connection.slug,
-                toolName: tool.name,
-                args,
-                trustTier: connection.trustTier,
-              },
-              finalResult,
-            );
-          }
-
-          // A server asking the model for personal data gets a warning the
-          // model reads with it, and an audit entry. See personal-data-guard.
-          return guardPersonalData(finalResult, {
-            slug: connection.slug,
-            tool: tool.name,
-            auditLog,
-          });
-        } catch (err) {
-          const durationMs = Date.now() - startedAt;
-          const msg =
-            err instanceof Error ? err.message : String(err);
-          log.error("Proxied tool call failed", {
-            nsName,
-            error: msg,
-          });
-
-          // Track failed call analytics
-          if (usageTracker) {
-            usageTracker.recordCall({
-              slug: connection.slug,
-              toolName: tool.name,
-              startedAt,
-              durationMs,
-              success: false,
-              error: msg,
-            });
-          }
-
-          // Safety audit: the tool call errored (forensics — what failed).
-          auditLog?.record({
-            type: "tool_call",
-            slug: connection.slug,
-            tool: tool.name,
-            enforcement: connection.manifest?.enforcement,
-            ok: false,
-            reason: msg.slice(0, 200),
-          });
-
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Error from ${connection.displayName}: ${msg}`,
-              },
-            ],
-            isError: true,
-          };
-        }
-      },
+      ) =>
+        callDownstreamTool(connection, tool.name, args, extra, {
+          proxyTimeoutMs,
+          permissionManager,
+          adTracker,
+          usageTracker,
+          pluginManager,
+          auditLog,
+        }),
     );
 
     registered.set(nsName, handle);
   }
 
   return registered;
+}
+
+/** What a downstream tool call is checked, tracked and recorded with. */
+export interface ToolCallDeps {
+  proxyTimeoutMs: number;
+  permissionManager?: PermissionManager;
+  adTracker?: AdTracker | null;
+  usageTracker?: UsageTracker;
+  pluginManager?: PluginManager;
+  auditLog?: AuditLog;
+}
+
+/**
+ * One downstream tool call with everything the gateway promises around it: the
+ * permission policy, plugin hooks, usage tracking, the audit entry, and the
+ * personal-data guard. The proxied tools and `mcp_call_tool` both call this, so
+ * neither path can skip what the other enforces. (`mcp_call_tool` used to call
+ * the server directly: no permission check, no plugins, no audit entry.)
+ */
+export async function callDownstreamTool(
+  connection: DownstreamConnection,
+  toolName: string,
+  args: Record<string, unknown>,
+  extra: unknown,
+  deps: ToolCallDeps,
+): Promise<CallToolResult> {
+  const { proxyTimeoutMs, permissionManager, adTracker, usageTracker, pluginManager, auditLog } =
+    deps;
+  const nsName = namespaceTool(connection.slug, toolName);
+  const startedAt = Date.now();
+
+  log.debug("Proxying tool call", {
+    nsName,
+    downstream: toolName,
+    server: connection.slug,
+  });
+
+  // Checked on every call, not only when the tools are registered: a blocked
+  // tool is never registered, but `mcp_call_tool` can still name it.
+  if (permissionManager && !permissionManager.isToolAllowed(connection.slug, toolName)) {
+    log.info("Tool call blocked by permission policy", {
+      tool: toolName,
+      server: connection.slug,
+    });
+    auditLog?.record({
+      type: "tool_blocked",
+      slug: connection.slug,
+      tool: toolName,
+      enforcement: connection.manifest?.enforcement,
+      reason: "blocked by permission policy",
+    });
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Tool "${toolName}" on "${connection.slug}" is blocked by your permission policy.`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  // Run plugin beforeToolCall hooks
+  if (pluginManager) {
+    const ctx = {
+      slug: connection.slug,
+      toolName,
+      args,
+      trustTier: connection.trustTier,
+    };
+    const modifiedCtx = await pluginManager.runBeforeToolCall(ctx);
+    if (modifiedCtx === null) {
+      // Plugin blocked the call
+      auditLog?.record({
+        type: "tool_blocked",
+        slug: connection.slug,
+        tool: toolName,
+        enforcement: connection.manifest?.enforcement,
+        reason: "blocked by gateway plugin",
+      });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Tool call blocked by gateway plugin.`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    // Use potentially modified args
+    args = modifiedCtx.args;
+  }
+
+  // Forward progress notifications back to the upstream client
+  // using the upstream-supplied progress token (Bug A fix).
+  const onprogress = buildProgressForwarder(
+    extra as Parameters<typeof buildProgressForwarder>[0],
+    { slug: connection.slug, toolName },
+  );
+
+  try {
+    const result = await connection.client.callTool(
+      { name: toolName, arguments: args },
+      undefined,
+      {
+        signal: AbortSignal.timeout(proxyTimeoutMs),
+        ...(onprogress ? { onprogress } : {}),
+      },
+    );
+
+    const durationMs = Date.now() - startedAt;
+
+    // Track tool usage for ad attribution (fire-and-forget)
+    if (adTracker) {
+      adTracker.trackToolUsage(connection.slug, toolName).catch(() => {});
+    }
+
+    // Track usage analytics
+    if (usageTracker) {
+      usageTracker.recordCall({
+        slug: connection.slug,
+        toolName,
+        startedAt,
+        durationMs,
+        success: true,
+      });
+    }
+
+    // Safety audit: the tool ran under its sandbox enforcement level.
+    auditLog?.record({
+      type: "tool_call",
+      slug: connection.slug,
+      tool: toolName,
+      enforcement: connection.manifest?.enforcement,
+      ok: true,
+    });
+
+    // Run plugin afterToolCall hooks
+    let finalResult = result as CallToolResult;
+    if (pluginManager) {
+      finalResult = await pluginManager.runAfterToolCall(
+        {
+          slug: connection.slug,
+          toolName,
+          args,
+          trustTier: connection.trustTier,
+        },
+        finalResult,
+      );
+    }
+
+    // A server asking the model for personal data gets a warning the
+    // model reads with it, and an audit entry. See personal-data-guard.
+    return guardPersonalData(finalResult, {
+      slug: connection.slug,
+      tool: toolName,
+      auditLog,
+    });
+  } catch (err) {
+    const durationMs = Date.now() - startedAt;
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error("Proxied tool call failed", {
+      nsName,
+      error: msg,
+    });
+
+    // Track failed call analytics
+    if (usageTracker) {
+      usageTracker.recordCall({
+        slug: connection.slug,
+        toolName,
+        startedAt,
+        durationMs,
+        success: false,
+        error: msg,
+      });
+    }
+
+    // Safety audit: the tool call errored (forensics — what failed).
+    auditLog?.record({
+      type: "tool_call",
+      slug: connection.slug,
+      tool: toolName,
+      enforcement: connection.manifest?.enforcement,
+      ok: false,
+      reason: msg.slice(0, 200),
+    });
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Error from ${connection.displayName}: ${msg}`,
+        },
+      ],
+      isError: true,
+    };
+  }
 }
 
 /**
