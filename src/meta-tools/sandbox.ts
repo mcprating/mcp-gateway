@@ -5,6 +5,7 @@ import { RegistryClient } from "../registry/registry-client.js";
 import {
   ManifestResolver,
   containmentRemedy,
+  isRegistryName,
   overrideForSet,
   overrideSlug,
   type ContainmentRemedy,
@@ -72,11 +73,41 @@ export function registerSandbox(
 
         // A registry name is known by the slug a connect by it gives the
         // server; its lookup also says the trust tier, which "set" may need.
-        const byName = params.slug.includes("/")
+        const byName = isRegistryName(params.slug)
           ? await lookUpTrust(registryClient, params.slug)
           : undefined;
         const key = overrideSlug(params.slug, byName);
-        if ("error" in key) return toolError(key.error);
+
+        // An override filed under the name itself, from before names were
+        // resolved to slugs. No connect applied it, and only this name, passed
+        // here, reaches it: view shows it, reset removes it, set replaces it.
+        const stale = isRegistryName(params.slug) ? resolver.getOverride(params.slug) : undefined;
+        const staleIs = stale
+          ? `the override saved under the name \`${params.slug}\` itself, from before overrides were filed by slug, which no connect ever applied. It said: \`${grantsJson(stale)}\``
+          : "";
+        // Others filed that way, which view lists so they can be found at all.
+        const others = resolver.nameKeyedOverrides().filter((k) => k !== params.slug);
+        const othersNote =
+          others.length > 0
+            ? `The overrides file also has ${others.length === 1 ? "an override" : `${others.length} overrides`} saved under a registry name from before overrides were filed by slug, which no connect ever applied: ${others.map((k) => `\`${k}\``).join(", ")}. \`mcp_sandbox({action: "reset", slug: "<name>"})\` removes one.`
+            : "";
+
+        // A name with no slug can still reach what was filed under it.
+        if ("error" in key) {
+          if (!stale || action === "set") return toolError(key.error);
+          if (action === "reset") {
+            resolver.clearOverride(params.slug);
+            return text(
+              `## 🛡️ Sandbox override cleared for \`${params.slug}\`\n\nRemoved ${staleIs}\n\nNothing filed under a slug was touched, since the name didn't resolve to one${byName?.status === "unreachable" ? " (no registry answered)" : ""}. If the server has an override under its slug as well, reset that slug.`,
+            );
+          }
+          return text(
+            [`## 🛡️ Sandbox: \`${params.slug}\``, key.error, `Still in the overrides file: ${staleIs}. \`reset\` removes it.`, othersNote]
+              .filter(Boolean)
+              .join("\n\n"),
+          );
+        }
+
         const { slug } = key;
         const named =
           slug === params.slug
@@ -86,8 +117,9 @@ export function registerSandbox(
         // ── RESET ──────────────────────────────────────────────────────────
         if (action === "reset") {
           resolver.clearOverride(slug);
+          if (stale) resolver.clearOverride(params.slug);
           return text(
-            `## 🛡️ Sandbox override cleared for \`${slug}\`\n\n${named}The server will use trust-tier defaults on the next connection.`,
+            `## 🛡️ Sandbox override cleared for \`${slug}\`\n\n${named}${stale ? `Also removed ${staleIs}\n\n` : ""}The server will use trust-tier defaults on the next connection.`,
           );
         }
 
@@ -97,10 +129,17 @@ export function registerSandbox(
           // override, then a note that defaults will apply on connect.
           const conn = connectionManager.getConnection(slug);
           const manifest = conn?.manifest ?? resolver.getOverride(slug);
+          const staleNote = stale ? `Still in the overrides file: ${staleIs}. \`reset\` removes it.` : "";
 
           if (!manifest) {
             return text(
-              `## 🛡️ Sandbox: \`${slug}\`\n\n${named}No saved override and not currently connected. Trust-tier defaults will apply when you connect. Use \`mcp_sandbox({action: "set", slug: "${slug}", ...})\` to pre-configure grants.`,
+              [
+                `## 🛡️ Sandbox: \`${slug}\`\n\n${named}No saved override and not currently connected. Trust-tier defaults will apply when you connect. Use \`mcp_sandbox({action: "set", slug: "${slug}", ...})\` to pre-configure grants.`,
+                staleNote,
+                othersNote,
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
             );
           }
 
@@ -110,23 +149,23 @@ export function registerSandbox(
             fellBack
               ? `Runs as \`${manifest.enforcement}\`: its manifest asks for \`${fellBack.enforcement}\`, but no container engine (Docker or Podman) was found when it connected.`
               : "",
+            staleNote,
           ].filter(Boolean);
-          return text(
-            renderManifest(slug, manifest, {
-              live: Boolean(conn),
-              note: notes.length > 0 ? notes.join("\n\n") : undefined,
-              // What would contain a live server depends on how it got here;
-              // a saved override keeps the default, which always applies.
-              remedy: conn?.manifest
-                ? containmentRemedy({
-                    resolved: conn.resolvedManifest ?? conn.manifest,
-                    trustTier: conn.trustTier,
-                    containerIsolation: resolver.containerIsolation,
-                    hasOverride: Boolean(resolver.getOverride(slug)),
-                  })
-                : undefined,
-            }),
-          );
+          const rendered = renderManifest(slug, manifest, {
+            live: Boolean(conn),
+            note: notes.length > 0 ? notes.join("\n\n") : undefined,
+            // What would contain a live server depends on how it got here;
+            // a saved override keeps the default, which always applies.
+            remedy: conn?.manifest
+              ? containmentRemedy({
+                  resolved: conn.resolvedManifest ?? conn.manifest,
+                  trustTier: conn.trustTier,
+                  containerIsolation: resolver.containerIsolation,
+                  hasOverride: Boolean(resolver.getOverride(slug)),
+                })
+              : undefined,
+          });
+          return text(othersNote ? `${rendered}\n\n${othersNote}` : rendered);
         }
 
         // ── SET ────────────────────────────────────────────────────────────
@@ -162,14 +201,20 @@ export function registerSandbox(
         );
 
         resolver.saveOverride(updated);
+        // This one replaces it. It wasn't built on: it was never applied, and
+        // starting from it would switch on grants that never took effect.
+        if (stale) resolver.clearOverride(params.slug);
 
         // The live connection keeps what it runs under until a reconnect.
         const fellBack =
           conn?.manifest && conn.resolvedManifest
             ? ` The live connection runs as \`${conn.manifest.enforcement}\`: no container engine (Docker or Podman) was found when it connected.`
             : "";
+        const replaced = stale
+          ? `Removed ${staleIs}. This override replaces it, and didn't start from it; pass any of those grants you still want.\n\n`
+          : "";
         return text(
-          `## 🛡️ Sandbox override saved for \`${slug}\`\n\n${named}${describeStart(slug, start, registryClient.registries.map((r) => r.label))}${fellBack}\n\n${renderManifest(slug, updated)}\n\n_Takes effect on the next connection. Reconnect to apply._`,
+          `## 🛡️ Sandbox override saved for \`${slug}\`\n\n${named}${replaced}${describeStart(slug, start, registryClient.registries.map((r) => r.label))}${fellBack}\n\n${renderManifest(slug, updated)}\n\n_Takes effect on the next connection. Reconnect to apply._`,
         );
       } catch (err) {
         return toolError(err instanceof Error ? err.message : String(err));
@@ -230,20 +275,26 @@ function renderManifest(
     "",
     "**Raw manifest:**",
     "```json",
-    JSON.stringify(
-      {
-        enforcement: manifest.enforcement,
-        env: manifest.env,
-        network: manifest.network,
-        filesystem: manifest.filesystem,
-        subprocess: manifest.subprocess,
-      },
-      null,
-      2,
-    ),
+    JSON.stringify(grants(manifest), null, 2),
     "```",
   ];
   return lines.join("\n");
+}
+
+/** What a manifest grants, as its raw form shows it. */
+function grants(manifest: CapabilityManifest) {
+  return {
+    enforcement: manifest.enforcement,
+    env: manifest.env,
+    network: manifest.network,
+    filesystem: manifest.filesystem,
+    subprocess: manifest.subprocess,
+  };
+}
+
+/** The same on one line, for an override shown in passing. */
+function grantsJson(manifest: CapabilityManifest): string {
+  return JSON.stringify(grants(manifest));
 }
 
 function text(t: string) {
