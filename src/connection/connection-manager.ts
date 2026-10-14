@@ -402,7 +402,9 @@ export class ConnectionManager {
             egressFiltered: Boolean(egressProxyUrl),
           });
         } else {
-          // No engine — downgrade to L1 and record it on the manifest.
+          // No engine — downgrade to L1 and record it on the manifest, keeping
+          // the one resolved for mcp_sandbox "set" to build on.
+          connection.resolvedManifest = manifest;
           manifest = { ...manifest, enforcement: "l1-process" };
           log.warn("Container isolation requested but no engine available; using L1", { slug });
         }

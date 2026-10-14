@@ -23,6 +23,8 @@ const REGISTRY_ONLY = {
 function setup(opts: {
   saved?: CapabilityManifest;
   live?: CapabilityManifest;
+  /** What the live connection's connect resolved, when it fell back from it. */
+  resolved?: CapabilityManifest;
   getServer?: () => Promise<unknown>;
 }) {
   let handler!: Handler;
@@ -41,7 +43,8 @@ function setup(opts: {
         saveOverride,
         containerIsolation: true,
       },
-      getConnection: () => (opts.live ? { manifest: opts.live } : undefined),
+      getConnection: () =>
+        opts.live ? { manifest: opts.live, resolvedManifest: opts.resolved } : undefined,
     } as never,
     { getServer } as never,
   );
@@ -50,8 +53,22 @@ function setup(opts: {
     expect(res.isError).toBeFalsy();
     return { text: res.content[0].text, saved: saveOverride.mock.calls[0]?.[0] };
   };
-  return { set, getServer };
+  const view = async () => (await handler({ action: "view", slug: "srv" })).content[0].text;
+  return { set, view, getServer };
 }
+
+const CONTAINED: CapabilityManifest = {
+  version: 1,
+  slug: "srv",
+  enforcement: "l2-container",
+  env: { allow: ["API_KEY"], inheritDefaults: true },
+  network: { mode: "none", allow: [] },
+  filesystem: { read: [], write: [] },
+  subprocess: false,
+};
+
+/** What connect records for CONTAINED with no Docker or Podman to run it. */
+const FELL_BACK = { live: { ...CONTAINED, enforcement: "l1-process" as const }, resolved: CONTAINED };
 
 describe("mcp_sandbox set", () => {
   it("keeps a slug the registry doesn't know in its container, as unknown", async () => {
@@ -93,18 +110,9 @@ describe("mcp_sandbox set", () => {
   });
 
   it("doesn't ask the registry when there is a saved override or a live connection", async () => {
-    const m: CapabilityManifest = {
-      version: 1,
-      slug: "srv",
-      enforcement: "l2-container",
-      env: { allow: ["API_KEY"], inheritDefaults: true },
-      network: { mode: "none", allow: [] },
-      filesystem: { read: [], write: [] },
-      subprocess: false,
-    };
     for (const [opts, said] of [
-      [{ saved: m }, "Changed the saved override"],
-      [{ live: m }, "Started from the live connection's manifest"],
+      [{ saved: CONTAINED }, "Changed the saved override"],
+      [{ live: CONTAINED }, "Started from the live connection's manifest"],
     ] as const) {
       const { set, getServer } = setup(opts);
       const { text, saved } = await set();
@@ -112,5 +120,30 @@ describe("mcp_sandbox set", () => {
       expect(saved?.env.allow).toEqual(["API_KEY"]);
       expect(text).toContain(said);
     }
+  });
+
+  it("keeps the container for a connection that fell back to L1 with no engine, and says why", async () => {
+    const { set } = setup(FELL_BACK);
+    const { text, saved } = await set();
+    expect(saved).toMatchObject({
+      enforcement: "l2-container",
+      network: { mode: "allowlist", allow: ["registry.npmjs.org"] },
+    });
+    expect(text).toContain("with enforcement `l2-container`, not the `l1-process` it runs as");
+    expect(text).toContain("no container engine (Docker or Podman) was found");
+  });
+});
+
+describe("mcp_sandbox view", () => {
+  it("shows what a fallen-back connection runs as, and what its manifest asks for", async () => {
+    const { view } = setup(FELL_BACK);
+    const text = await view();
+    expect(text).toContain("**Enforcement:** l1-process");
+    expect(text).toContain("Runs as `l1-process`: its manifest asks for `l2-container`");
+  });
+
+  it("adds nothing for a connection running what it resolved", async () => {
+    const { view } = setup({ live: CONTAINED });
+    expect(await view()).not.toContain("Runs as");
   });
 });

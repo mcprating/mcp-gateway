@@ -14,9 +14,10 @@ vi.mock("./transport-factory.js", () => ({
   createTransport: (...a: unknown[]) => createTransport(...a),
 }));
 const resolveBakedImage = vi.hoisted(() => vi.fn());
+const detectContainerEngine = vi.hoisted(() => vi.fn());
 vi.mock("../sandbox/container-runtime.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../sandbox/container-runtime.js")>()),
-  detectContainerEngine: async () => "docker",
+  detectContainerEngine: () => detectContainerEngine(),
   resolveBakedImage: (...a: unknown[]) => resolveBakedImage(...a),
 }));
 
@@ -79,6 +80,34 @@ beforeEach(() => {
   createTransport.mockImplementation(async () => fakeTransportResult());
   resolveBakedImage.mockReset();
   resolveBakedImage.mockResolvedValue(null);
+  detectContainerEngine.mockReset();
+  detectContainerEngine.mockResolvedValue("docker");
+});
+
+describe("no container engine", () => {
+  it("runs at L1, and keeps the l2-container manifest it resolved for mcp_sandbox set", async () => {
+    detectContainerEngine.mockResolvedValue(null);
+    const resolved = manifest({ mode: "none", allow: [] });
+    const { cm } = manager(resolved);
+    await cm.connect({ command: "npx", args: ["-y", "some-server"], confirmed: true });
+
+    expect(createTransport.mock.calls[0][0].command).toBe("npx");
+    const conn = cm.getConnection("npx-some-server");
+    expect(conn?.manifest?.enforcement).toBe("l1-process");
+    expect(conn?.resolvedManifest).toBe(resolved);
+    await cm.disconnect("npx-some-server", { removeProfile: false });
+  });
+
+  it("records nothing extra when the container runs", async () => {
+    resolveBakedImage.mockResolvedValue({ image: "mcp-sandbox/npx-some-server:latest", bin: "some-server" });
+    const { cm } = manager(manifest({ mode: "none", allow: [] }));
+    await cm.connect({ command: "npx", args: ["-y", "some-server"], confirmed: true });
+
+    const conn = cm.getConnection("npx-some-server");
+    expect(conn?.manifest?.enforcement).toBe("l2-container");
+    expect(conn?.resolvedManifest).toBeUndefined();
+    await cm.disconnect("npx-some-server", { removeProfile: false });
+  });
 });
 
 describe("network:none without a baked image", () => {

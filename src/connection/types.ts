@@ -82,8 +82,16 @@ export interface DownstreamConnection {
   trustTier: TrustTier;
   serverInfo?: { name: string; version: string };
 
-  /** Resolved sandbox capability manifest (L1+) for this connection */
+  /** Sandbox capability manifest (L1+) this connection runs under: what is enforced */
   manifest?: CapabilityManifest;
+  /**
+   * The manifest the connect resolved, when it couldn't run it: l2-container
+   * with no Docker or Podman to start one, so `manifest` records the
+   * l1-process it fell back to. mcp_sandbox "set" builds on this one, or an
+   * override saved meanwhile would keep the server on the host after the
+   * engine came back.
+   */
+  resolvedManifest?: CapabilityManifest;
 
   /** Egress allowlist proxy (L2 network:allowlist mode) — stopped on disconnect */
   egressProxy?: EgressProxy;

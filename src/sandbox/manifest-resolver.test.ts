@@ -147,7 +147,7 @@ describe("overrideForSet", () => {
       REGISTRY_ONLY,
       {
         saved,
-        live: manifest({ enforcement: "l1-process", env: { allow: [], inheritDefaults: true } }),
+        live: { running: manifest({ enforcement: "l1-process", env: { allow: [], inheritDefaults: true } }) },
         lookup: { status: "found", server: GITHUB, trustTier: "verified" },
       },
       false,
@@ -158,12 +158,37 @@ describe("overrideForSet", () => {
   });
 
   it("starts from the live connection's manifest when nothing is saved", () => {
-    const live = manifest({ env: { allow: ["PASSED_AT_CONNECT"], inheritDefaults: true } });
-    const { manifest: m, start } = overrideForSet("srv", REGISTRY_ONLY, { live }, false);
+    const running = manifest({ env: { allow: ["PASSED_AT_CONNECT"], inheritDefaults: true } });
+    const { manifest: m, start } = overrideForSet("srv", REGISTRY_ONLY, { live: { running } }, false);
     expect(start).toEqual({ from: "connection" });
     expect(m.enforcement).toBe("l2-container");
     expect(m.env.allow).toEqual(["PASSED_AT_CONNECT"]);
     expect(m.limits).toEqual({ maxMemoryMb: 256 });
+  });
+
+  it("builds on the container a connection resolved, not the l1-process it fell back to with no engine", () => {
+    // What connect records with no Docker or Podman: the resolved manifest, and
+    // a copy at l1-process that the connection actually runs under.
+    const resolved = manifest();
+    const running = { ...resolved, enforcement: "l1-process" as const };
+    const { manifest: m, start } = overrideForSet("srv", REGISTRY_ONLY, { live: { running, resolved } }, true);
+    expect(m).toEqual({ ...resolved, network: { mode: "allowlist", allow: ["registry.npmjs.org"] } });
+    expect(start).toEqual({
+      from: "connection",
+      fellBack: { resolved: "l2-container", running: "l1-process" },
+    });
+  });
+
+  it("still saves l1-process for a fallen-back connection when that is asked for", () => {
+    const resolved = manifest();
+    const running = { ...resolved, enforcement: "l1-process" as const };
+    const { manifest: m } = overrideForSet(
+      "srv",
+      { enforcement: "l1-process" },
+      { live: { running, resolved } },
+      true,
+    );
+    expect(m.enforcement).toBe("l1-process");
   });
 
   it("applies every field it is given, an empty list included", () => {

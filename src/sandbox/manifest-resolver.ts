@@ -128,7 +128,8 @@ export interface ManifestChanges {
 /** What an override was built on, so mcp_sandbox can tell the user. */
 export type OverrideStart =
   | { from: "override" }
-  | { from: "connection" }
+  /** `fellBack` when the connection runs under less than it resolved (no engine). */
+  | { from: "connection"; fellBack?: { resolved: EnforcementLevel; running: EnforcementLevel } }
   | { from: "defaults"; trustTier: TrustTier; lookup: TrustLookup["status"] };
 
 /**
@@ -138,6 +139,11 @@ export type OverrideStart =
  * for its trust tier. (A fixed l1-process baseline used to stand in for the
  * last, so changing only the network also dropped the container and the
  * server's declared env vars.)
+ *
+ * For a live connection that is the manifest its connect resolved, not the
+ * one it runs under: with no container engine, an l2-container connection
+ * runs as l1-process, and an override built on that kept the server out of a
+ * container even once an engine was there.
  *
  * The tier comes from `lookup`, which the caller needs to make only when
  * there is neither a saved override nor a live manifest. A slug the registry
@@ -150,7 +156,11 @@ export function overrideForSet(
   changes: ManifestChanges,
   current: {
     saved?: CapabilityManifest;
-    live?: CapabilityManifest;
+    /**
+     * What the live connection runs under, and what its connect resolved if
+     * that was more than it could run (an l2-container with no engine).
+     */
+    live?: { running: CapabilityManifest; resolved?: CapabilityManifest };
     lookup?: TrustLookup;
   },
   containerIsolation: boolean,
@@ -161,8 +171,15 @@ export function overrideForSet(
     base = current.saved;
     start = { from: "override" };
   } else if (current.live) {
-    base = current.live;
-    start = { from: "connection" };
+    const { running, resolved = running } = current.live;
+    base = resolved;
+    start =
+      resolved.enforcement === running.enforcement
+        ? { from: "connection" }
+        : {
+            from: "connection",
+            fellBack: { resolved: resolved.enforcement, running: running.enforcement },
+          };
   } else {
     const lookup: TrustLookup = current.lookup ?? { status: "unreachable" };
     const found = lookup.status === "found" ? lookup : null;

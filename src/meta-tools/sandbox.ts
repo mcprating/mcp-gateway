@@ -84,7 +84,17 @@ export function registerSandbox(
             );
           }
 
-          return text(renderManifest(slug, manifest, Boolean(conn)));
+          const fellBack = conn?.manifest && conn.resolvedManifest;
+          return text(
+            renderManifest(
+              slug,
+              manifest,
+              Boolean(conn),
+              fellBack
+                ? `Runs as \`${manifest.enforcement}\`: its manifest asks for \`${fellBack.enforcement}\`, but no container engine (Docker or Podman) was found when it connected.`
+                : undefined,
+            ),
+          );
         }
 
         // ── SET ────────────────────────────────────────────────────────────
@@ -92,7 +102,8 @@ export function registerSandbox(
         // live connection's manifest, else what a connect would resolve. Only
         // that last one needs the trust tier, and so the registry.
         const saved = resolver.getOverride(slug);
-        const live = connectionManager.getConnection(slug)?.manifest;
+        const conn = connectionManager.getConnection(slug);
+        const live = conn?.manifest && { running: conn.manifest, resolved: conn.resolvedManifest };
         const lookup = saved || live ? undefined : await lookUpTrust(registryClient, slug);
         const { manifest: updated, start } = overrideForSet(
           slug,
@@ -138,6 +149,10 @@ function describeStart(slug: string, start: OverrideStart): string {
     case "override":
       return "Changed the saved override; fields you didn't pass kept their saved values.";
     case "connection":
+      if (start.fellBack) {
+        const { resolved, running } = start.fellBack;
+        return `Started from the manifest this connection resolved, with enforcement \`${resolved}\`, not the \`${running}\` it runs as: no container engine (Docker or Podman) was found when it connected. Fields you didn't pass kept the resolved values.`;
+      }
       return "Started from the live connection's manifest; fields you didn't pass kept its values.";
     case "defaults": {
       const tier = `\`${start.trustTier}\``;
@@ -157,11 +172,13 @@ function renderManifest(
   slug: string,
   manifest: CapabilityManifest,
   isLive: boolean,
+  note?: string,
 ): string {
   const summary = ManifestResolver.summarize(manifest);
   const lines = [
     `## 🛡️ Sandbox: \`${slug}\`${isLive ? " (active connection)" : ""}`,
     `**Enforcement:** ${manifest.enforcement}`,
+    ...(note ? ["", note] : []),
     "",
     "**Grants:**",
     ...summary.lines.map((l) => `- ${l}`),
