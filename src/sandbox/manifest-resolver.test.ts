@@ -1,10 +1,12 @@
+import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   ManifestResolver,
   overrideForSet,
   tierDefaults,
+  withConnectEnv,
   type ManifestChanges,
 } from "./manifest-resolver.js";
 import type { RegistryServer, TrustTier } from "../registry/types.js";
@@ -61,25 +63,61 @@ describe("tierDefaults", () => {
     expect(m.subprocess).toBe(false);
   });
 
-  it("allows the declared auth env vars and the names passed at connect, once each", () => {
-    const m = tierDefaults("s", "community", {
-      containerIsolation: false,
-      registryServer: GITHUB,
-      userProvidedEnvKeys: ["GITHUB_TOKEN", "EXTRA"],
-    });
-    expect(m.env).toEqual({ allow: ["GITHUB_TOKEN", "EXTRA"], inheritDefaults: true });
+  it("allows the auth env vars the registry record declares, and nothing else", () => {
+    const m = tierDefaults("s", "community", { containerIsolation: false, registryServer: GITHUB });
+    expect(m.env).toEqual({ allow: ["GITHUB_TOKEN"], inheritDefaults: true });
   });
 
-  it("is what ManifestResolver.resolve returns for a server with no saved override", () => {
+  it("is what ManifestResolver.resolve returns for a server with no saved override, before connect env", () => {
     const missing = join(tmpdir(), `mcp-gateway-no-such-manifests-${process.pid}.json`);
     for (const containerIsolation of [true, false]) {
       const resolver = new ManifestResolver(missing, containerIsolation);
       for (const t of ALL_TIERS) {
-        expect(resolver.resolve("s", t, GITHUB, ["EXTRA"])).toEqual(
-          tierDefaults("s", t, { containerIsolation, registryServer: GITHUB, userProvidedEnvKeys: ["EXTRA"] }),
-        );
+        const defaults = tierDefaults("s", t, { containerIsolation, registryServer: GITHUB });
+        expect(resolver.resolve("s", t, GITHUB)).toEqual(defaults);
+        expect(resolver.resolve("s", t, GITHUB, ["EXTRA"])).toEqual(withConnectEnv(defaults, ["EXTRA"]));
       }
     }
+  });
+});
+
+/**
+ * A saved override used to be applied as saved, without the env names passed
+ * to mcp_connect. Their values still reached a server at L1, but under L2
+ * only names in env.allow are forwarded into the container, so a contained
+ * server with an override never received what the user handed it.
+ */
+describe("withConnectEnv", () => {
+  it("allows the names passed to the connect, once each, after the ones already allowed", () => {
+    const m = withConnectEnv(manifest(), ["EXTRA", "API_KEY", "EXTRA"]);
+    expect(m.env).toEqual({ allow: ["API_KEY", "EXTRA"], inheritDefaults: true });
+  });
+
+  it("returns the manifest itself when there is nothing to add, and never changes it", () => {
+    const saved = manifest();
+    expect(withConnectEnv(saved, ["API_KEY"])).toBe(saved);
+    withConnectEnv(saved, ["EXTRA"]);
+    expect(saved.env.allow).toEqual(["API_KEY"]);
+  });
+});
+
+describe("ManifestResolver.resolve with a saved override", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "mcp-gateway-manifests-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("allows the env names passed to this connect, without saving them into the override", () => {
+    const file = join(dir, "manifests.json");
+    const resolver = new ManifestResolver(file, true);
+    resolver.saveOverride(manifest({ env: { allow: [], inheritDefaults: true } }));
+
+    expect(resolver.resolve("srv", "unknown", null, ["API_KEY"]).env.allow).toEqual(["API_KEY"]);
+    // The next connect, and mcp_sandbox "set", still see the override as saved.
+    expect(resolver.resolve("srv", "unknown", null).env.allow).toEqual([]);
+    expect(resolver.getOverride("srv")?.env.allow).toEqual([]);
+    expect(new ManifestResolver(file, true).getOverride("srv")?.env.allow).toEqual([]);
   });
 });
 

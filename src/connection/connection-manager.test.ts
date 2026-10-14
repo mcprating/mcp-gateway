@@ -1,4 +1,8 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { ManifestResolver } from "../sandbox/manifest-resolver.js";
 import type { CapabilityManifest } from "../sandbox/types.js";
 import type { GatewayConfig } from "../config/types.js";
 
@@ -82,6 +86,35 @@ beforeEach(() => {
   resolveBakedImage.mockResolvedValue(null);
   detectContainerEngine.mockReset();
   detectContainerEngine.mockResolvedValue("docker");
+});
+
+describe("env passed to mcp_connect", () => {
+  it("is forwarded into the container of a server with a saved override", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mcp-gateway-manifests-"));
+    try {
+      const resolver = new ManifestResolver(join(dir, "manifests.json"), true);
+      resolver.saveOverride({ ...manifest({ mode: "none", allow: [] }), slug: "npx-some-server" });
+      resolveBakedImage.mockResolvedValue({ image: "mcp-sandbox/npx-some-server:latest", bin: "some-server" });
+      const { cm } = manager(manifest({ mode: "none", allow: [] }));
+      cm.manifestResolver = resolver;
+
+      await cm.connect({
+        command: "npx",
+        args: ["-y", "some-server"],
+        env: { API_KEY: "passed-at-connect" },
+        confirmed: true,
+      });
+
+      const launch = createTransport.mock.calls[0][0];
+      expect(launch.command).toBe("docker");
+      expect(launch.args[launch.args.indexOf("API_KEY") - 1]).toBe("-e");
+      expect(launch.preScopedEnv.API_KEY).toBe("passed-at-connect");
+      expect(resolver.getOverride("npx-some-server")?.env.allow).toEqual([]);
+      await cm.disconnect("npx-some-server", { removeProfile: false });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("no container engine", () => {
