@@ -55,7 +55,7 @@ export function registerMetaTools(
   registerServerInfo(server, connectionManager, registryClient);
   registerCallTool(server, connectionManager);
   registerHealth(server, connectionManager, registryClient);
-  registerSandbox(server, connectionManager);
+  registerSandbox(server, connectionManager, registryClient);
 
   // Safety audit forensics meta-tool
   if (options.auditLog) {

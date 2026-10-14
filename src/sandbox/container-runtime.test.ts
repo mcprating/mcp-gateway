@@ -38,16 +38,16 @@ describe("offlineStartProblem", () => {
       "node scripts/build-server-image.mjs --slug npx-server-everything --package @modelcontextprotocol/server-everything",
     );
     expect(msg).toContain(
-      'mcp_sandbox({action: "set", slug: "npx-server-everything", enforcement: "l2-container", network: "allowlist", networkAllow: ["registry.npmjs.org"]})',
+      'mcp_sandbox({action: "set", slug: "npx-server-everything", network: "allowlist", networkAllow: ["registry.npmjs.org"]})',
     );
   });
 
-  it("keeps the container in the network way out, since set without an override falls back to l1-process", () => {
+  it("leaves the container to set, which keeps the enforcement a connect would resolve", () => {
     const msg = offlineStartProblem("s", manifest(), "npx", EVERYTHING, undefined);
-    expect(msg).toContain('enforcement: "l2-container"');
+    expect(msg).not.toContain("enforcement:");
   });
 
-  it("carries the server's env grants into the mcp_sandbox call, which would otherwise drop them", () => {
+  it("restates the env names this connect allowed, since set can't know the ones passed to mcp_connect", () => {
     const m = manifest({ env: { allow: ["GITHUB_TOKEN"], inheritDefaults: true } });
     expect(offlineStartProblem("s", m, "npx", EVERYTHING, null)).toContain('envAllow: ["GITHUB_TOKEN"]');
     expect(offlineStartProblem("s", manifest(), "npx", EVERYTHING, null)).not.toContain("envAllow");

@@ -227,14 +227,14 @@ export function offlineStartProblem(
     return lines.join("\n");
   }
 
-  // mcp_sandbox "set" on a server with no saved override starts from an
-  // l1-process baseline with no env grants, so spell out what must survive:
-  // the container, and the env names this server was already allowed.
+  // mcp_sandbox "set" on a server with no saved override starts from what a
+  // connect resolves for its trust tier, so the container and the env vars
+  // the registry declares carry over. Names passed in mcp_connect's `env`
+  // don't, as only that connect knew them: restate the env names allowed.
   const hosts = launch.downloadHosts;
   const sandboxArgs = [
     `action: "set"`,
     `slug: ${JSON.stringify(slug)}`,
-    `enforcement: "l2-container"`,
     `network: "allowlist"`,
     `networkAllow: ${JSON.stringify(hosts)}`,
     ...(manifest.env.allow.length > 0 ? [`envAllow: ${JSON.stringify(manifest.env.allow)}`] : []),
