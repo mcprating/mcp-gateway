@@ -10,6 +10,7 @@ import {
   detectContainerEngine,
   buildContainerCommand,
   resolveBakedImage,
+  offlineStartProblem,
 } from "../sandbox/container-runtime.js";
 import { EgressProxy, egressBindHost } from "../sandbox/egress-proxy.js";
 import type { AuditLog } from "../audit/audit-log.js";
@@ -380,6 +381,12 @@ export class ConnectionManager {
           // Prefer a pre-baked image if one exists — it runs offline, so
           // network:none works without an npx/uvx fetch at runtime.
           const bakedImage = (await resolveBakedImage(engine, slug)) ?? undefined;
+
+          // Without one, npx/uvx under network:none can't fetch the package
+          // and the connect would end at the handshake timeout, saying only
+          // that it timed out. Refuse now and say what would work.
+          const offline = offlineStartProblem(slug, manifest, command, args || [], bakedImage);
+          if (offline) throw new ConnectionError(offline, slug);
 
           const wrapped = buildContainerCommand(engine, manifest, command, args || [], {
             egressProxyUrl,
