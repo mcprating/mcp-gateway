@@ -1,6 +1,30 @@
 import { createServer, type Server, type IncomingMessage } from "node:http";
 import { connect as netConnect, type Socket } from "node:net";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { log } from "../utils/logger.js";
+
+/** The user name in the proxy URL; the per-proxy secret is the password. */
+const PROXY_USER = "mcp-gateway";
+
+/**
+ * Where the egress proxy listens. The container reaches it as
+ * `host.docker.internal` (`--add-host …:host-gateway`), and what that name lands
+ * on differs by engine and platform:
+ *
+ *  - Docker Desktop (Windows, macOS) forwards it to the host's loopback, so the
+ *    proxy can listen on 127.0.0.1 and nothing off the machine can reach it.
+ *  - Docker on Linux maps it to the bridge gateway (docker0, usually 172.17.0.1),
+ *    which a loopback socket does not accept, so the proxy has to listen on every
+ *    interface there — and Podman we have not verified either way.
+ *
+ * Wherever it is reachable from the network, the per-proxy credential is what
+ * keeps other machines from using it (see EgressProxy).
+ */
+export function egressBindHost(engine: string, platform: NodeJS.Platform): string {
+  return engine === "docker" && (platform === "win32" || platform === "darwin")
+    ? "127.0.0.1"
+    : "0.0.0.0";
+}
 
 /**
  * Match a "host:port" target against an allowlist pattern.
@@ -103,6 +127,13 @@ export function matchesAllowlist(
  * and reach it through `host.docker.internal`. This gives `network: allowlist`
  * real teeth without a container sidecar.
  *
+ * Every tunnel must present this proxy's own random credential, which is
+ * embedded in the proxy URL the container is given. Where the proxy has to
+ * listen on all interfaces (see egressBindHost), that is what stops another
+ * machine on the network from using the gateway host as an open relay — and
+ * from filling the audit log with traffic attributed to this server. It used to
+ * listen on 0.0.0.0 everywhere, with no credential.
+ *
  * Limitation: only proxy-aware clients (those honoring HTTP(S)_PROXY) are
  * filtered. Clients that ignore proxy env vars bypass it — full enforcement
  * still requires L2 network namespacing, but this covers the common case
@@ -112,6 +143,12 @@ export class EgressProxy {
   private server: Server | null = null;
   private port = 0;
   private blockedCount = 0;
+  /** Open tunnel sockets, ended on stop() — server.close() alone waits for them. */
+  private readonly tunnels = new Set<Socket>();
+  private readonly secret = randomBytes(24).toString("hex");
+  private readonly expectedAuth = Buffer.from(
+    "Basic " + Buffer.from(`${PROXY_USER}:${this.secret}`).toString("base64"),
+  );
 
   constructor(
     private readonly allowlist: string[],
@@ -125,6 +162,8 @@ export class EgressProxy {
         reason?: string;
       }) => void;
     },
+    /** Interface to listen on; see egressBindHost. */
+    private readonly bindHost = "127.0.0.1",
   ) {
     // Say it once, at construction, rather than leaving the author to infer a
     // typo'd allowlist from a downstream package's connection timeout.
@@ -133,7 +172,7 @@ export class EgressProxy {
     }
   }
 
-  /** Start listening on a random loopback port. Resolves with the port. */
+  /** Start listening on a random port of `bindHost`. Resolves with the port. */
   async start(): Promise<number> {
     return new Promise((resolve, reject) => {
       const server = createServer((req, res) => {
@@ -149,14 +188,13 @@ export class EgressProxy {
 
       server.on("error", (err) => reject(err));
 
-      // Bind to loopback only — the container reaches it via host.docker.internal,
-      // which Docker maps to the host loopback.
-      server.listen(0, "0.0.0.0", () => {
+      server.listen(0, this.bindHost, () => {
         const addr = server.address();
         this.port = typeof addr === "object" && addr ? addr.port : 0;
         this.server = server;
         log.info("Egress proxy started", {
           slug: this.slug,
+          host: this.bindHost,
           port: this.port,
           allowlist: this.allowlist,
         });
@@ -174,6 +212,27 @@ export class EgressProxy {
     const target = req.url || "";
     const [host, portStr] = target.split(":");
     const port = parseInt(portStr || "443", 10);
+
+    // Not our container: whoever this is did not get the URL with the secret.
+    if (!this.authorized(req.headers["proxy-authorization"])) {
+      this.blockedCount++;
+      log.warn("Egress proxy refused a client without its credential", {
+        slug: this.slug,
+        target,
+        from: clientSocket.remoteAddress,
+      });
+      this.auditLog?.record({
+        type: "egress_blocked",
+        slug: this.slug,
+        target,
+        reason: `no valid proxy credential (from ${clientSocket.remoteAddress ?? "unknown"})`,
+      });
+      clientSocket.write(
+        'HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="mcp-gateway"\r\n\r\n',
+      );
+      clientSocket.end();
+      return;
+    }
 
     if (!host || !matchesAllowlist(host, port, this.allowlist)) {
       this.blockedCount++;
@@ -205,6 +264,11 @@ export class EgressProxy {
       clientSocket.pipe(upstream);
     });
 
+    for (const s of [clientSocket, upstream]) {
+      this.tunnels.add(s);
+      s.on("close", () => this.tunnels.delete(s));
+    }
+
     upstream.on("error", (err) => {
       log.debug("Egress upstream error", { slug: this.slug, target, error: String(err) });
       clientSocket.end();
@@ -212,9 +276,20 @@ export class EgressProxy {
     clientSocket.on("error", () => upstream.end());
   }
 
-  /** The proxy URL the container should use (via host.docker.internal). */
+  private authorized(header: string | undefined): boolean {
+    if (!header) return false;
+    const given = Buffer.from(header);
+    return given.length === this.expectedAuth.length && timingSafeEqual(given, this.expectedAuth);
+  }
+
+  /**
+   * The proxy URL the container should use (via host.docker.internal), with the
+   * credential in it. Proxy-aware clients (curl, undici, requests, Go) send it
+   * as Proxy-Authorization on CONNECT. It is a secret: pass it to the container
+   * through the environment, not on a command line.
+   */
   get containerProxyUrl(): string {
-    return `http://host.docker.internal:${this.port}`;
+    return `http://${PROXY_USER}:${this.secret}@host.docker.internal:${this.port}`;
   }
 
   get blocked(): number {
@@ -224,7 +299,10 @@ export class EgressProxy {
   /** Stop the proxy. */
   async stop(): Promise<void> {
     if (!this.server) return;
-    await new Promise<void>((resolve) => this.server!.close(() => resolve()));
+    const closed = new Promise<void>((resolve) => this.server!.close(() => resolve()));
+    for (const s of this.tunnels) s.destroy();
+    this.server.closeAllConnections?.(); // Node ≥ 18.2
+    await closed;
     this.server = null;
     log.debug("Egress proxy stopped", { slug: this.slug });
   }

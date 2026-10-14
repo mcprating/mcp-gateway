@@ -90,6 +90,14 @@ export interface DownstreamConnection {
 
   /** Original connect params — stored for auto-reconnect */
   originalParams?: ConnectParams;
+  /**
+   * The exact launch the connect resolved: the container-wrapped command, the
+   * scoped environment, the installed command, the URL. Auto-reconnect reuses
+   * it as-is, so a server that crashed comes back inside the same sandbox.
+   * (Reconnect used to rebuild from originalParams — no container, no env
+   * scoping, and `npx` for a server connected by slug.)
+   */
+  launch?: ResolvedLaunch;
   /** Current reconnect attempt count (reset on successful reconnect) */
   reconnectAttempts: number;
 
@@ -100,6 +108,16 @@ export interface DownstreamConnection {
 }
 
 // ── Connect Parameters ───────────────────────────────────────────────────────
+
+/** What createTransport is called with for a connection; see DownstreamConnection.launch. */
+export interface ResolvedLaunch {
+  transportType: TransportType;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  preScopedEnv?: Record<string, string>;
+  url?: string;
+}
 
 export interface ConnectParams {
   /** Server slug from MCP-Rating registry */

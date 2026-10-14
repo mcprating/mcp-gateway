@@ -1,10 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ConnectionManager } from "../connection/connection-manager.js";
-import { parseNamespacedTool } from "../proxy/tool-router.js";
-import { buildProgressForwarder } from "../proxy/progress-forwarder.js";
-import { guardPersonalData } from "../proxy/personal-data-guard.js";
+import { callDownstreamTool, parseNamespacedTool } from "../proxy/tool-router.js";
 import { toolError } from "../utils/errors.js";
 import { log } from "../utils/logger.js";
 
@@ -76,28 +73,16 @@ export function registerCallTool(
 
         log.debug("mcp_call_tool proxying", { slug, toolName });
 
-        // Forward progress notifications back to the upstream client
-        // using the upstream-supplied progress token (Bug A fix).
-        const onprogress = buildProgressForwarder(
-          extra as Parameters<typeof buildProgressForwarder>[0],
-          { slug, toolName },
+        // The same path as the proxied tools: permission policy, plugins,
+        // audit entry, usage, personal-data guard. The 31B reached servers
+        // through both, and this one used to skip all but the last.
+        return await callDownstreamTool(
+          connection,
+          toolName,
+          args,
+          extra,
+          connectionManager.toolCallDeps,
         );
-
-        const result = await connection.client.callTool(
-          { name: toolName, arguments: args },
-          undefined,
-          {
-            signal: AbortSignal.timeout(30_000),
-            ...(onprogress ? { onprogress } : {}),
-          },
-        );
-
-        // Same guard as proxied calls: the 31B reached servers through both.
-        return guardPersonalData(result as CallToolResult, {
-          slug,
-          tool: toolName,
-          auditLog: connectionManager.auditLog,
-        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         log.error("mcp_call_tool failed", { name, error: msg });

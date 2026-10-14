@@ -1,0 +1,150 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { CapabilityManifest } from "../sandbox/types.js";
+import type { GatewayConfig } from "../config/types.js";
+
+/**
+ * A server that crashed used to come back from originalParams: no container,
+ * no scoped environment â€” the sandboxed server restarted on the host with the
+ * gateway's whole environment. These tests start a "sandboxed" server, crash it,
+ * and look at what the reconnect launched.
+ */
+
+const createTransport = vi.hoisted(() => vi.fn());
+vi.mock("./transport-factory.js", () => ({
+  createTransport: (...a: unknown[]) => createTransport(...a),
+}));
+vi.mock("../sandbox/container-runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../sandbox/container-runtime.js")>()),
+  detectContainerEngine: async () => "docker",
+  resolveBakedImage: async () => null,
+}));
+
+const { ConnectionManager } = await import("./connection-manager.js");
+
+function fakeTransportResult() {
+  return {
+    client: { callTool: vi.fn(), close: vi.fn() },
+    transport: { close: vi.fn(async () => {}) },
+    serverInfo: { name: "fake", version: "1" },
+    tools: [],
+    resources: [],
+    prompts: [],
+  };
+}
+
+const mcpServer = {
+  tool: vi.fn(() => ({ remove: vi.fn() })),
+  sendToolListChanged: vi.fn(),
+  sendResourceListChanged: vi.fn(),
+  sendPromptListChanged: vi.fn(),
+};
+
+const config = {
+  maxConnections: 5,
+  proxyTimeoutMs: 1000,
+  reconnectMaxAttempts: 3,
+  reconnectBaseDelayMs: 1,
+  enableAutoInstall: false,
+  profilesPath: "unused",
+} as unknown as GatewayConfig;
+
+function manifest(network: CapabilityManifest["network"]): CapabilityManifest {
+  return {
+    version: 1,
+    slug: "x",
+    enforcement: "l2-container",
+    env: { allow: [], inheritDefaults: true },
+    network,
+    filesystem: { read: [], write: [] },
+    subprocess: false,
+  };
+}
+
+function manager(m: CapabilityManifest) {
+  const audit: Array<{ type: string; reason?: string }> = [];
+  const cm = new ConnectionManager(
+    mcpServer as never,
+    {} as never,
+    { isToolAllowed: () => true } as never,
+    config,
+  );
+  cm.manifestResolver = { resolve: () => m } as never;
+  cm.auditLog = { record: (e: { type: string; reason?: string }) => audit.push(e) } as never;
+  return { cm, audit };
+}
+
+beforeEach(() => {
+  createTransport.mockReset();
+  createTransport.mockImplementation(async () => fakeTransportResult());
+});
+
+describe("auto-reconnect", () => {
+  it("restarts a crashed server inside the same container with the same scoped env", async () => {
+    const { cm, audit } = manager(manifest({ mode: "none", allow: [] }));
+    await cm.connect({ command: "npx", args: ["-y", "some-server"], confirmed: true });
+
+    const first = createTransport.mock.calls[0][0];
+    expect(first.command).toBe("docker");
+    expect(first.args).toContain("--network");
+    expect(first.preScopedEnv).toBeDefined();
+
+    first.onClose(); // the process exits
+    await vi.waitFor(() => expect(createTransport).toHaveBeenCalledTimes(2));
+
+    const second = createTransport.mock.calls[1][0];
+    expect(second.command).toBe(first.command);
+    expect(second.args).toEqual(first.args);
+    expect(second.preScopedEnv).toEqual(first.preScopedEnv);
+    await vi.waitFor(() =>
+      expect(audit.at(-1)?.reason).toMatch(/restarted after a crash \(attempt 1\) with the same launch/),
+    );
+    await cm.disconnect(first.slug, { removeProfile: false });
+  });
+
+  it("keeps the egress proxy URL â€” the same proxy â€” across a reconnect", async () => {
+    const { cm } = manager(manifest({ mode: "allowlist", allow: ["example.com:443"] }));
+    await cm.connect({ command: "npx", args: ["-y", "some-server"], confirmed: true });
+
+    const first = createTransport.mock.calls[0][0];
+    expect(first.preScopedEnv.HTTPS_PROXY).toMatch(/^http:\/\/mcp-gateway:[0-9a-f]{48}@host\.docker\.internal:\d+$/);
+    expect(first.args.join(" ")).not.toContain(first.preScopedEnv.HTTPS_PROXY);
+
+    first.onClose();
+    await vi.waitFor(() => expect(createTransport).toHaveBeenCalledTimes(2));
+    expect(createTransport.mock.calls[1][0].preScopedEnv.HTTPS_PROXY).toBe(first.preScopedEnv.HTTPS_PROXY);
+    await cm.disconnect(first.slug, { removeProfile: false });
+  });
+
+  it("stops the egress proxy when the connect itself fails", async () => {
+    const { cm } = manager(manifest({ mode: "allowlist", allow: ["example.com:443"] }));
+    let proxyUrl = "";
+    createTransport.mockImplementationOnce(async (p: { preScopedEnv: Record<string, string> }) => {
+      proxyUrl = p.preScopedEnv.HTTPS_PROXY;
+      throw new Error("handshake failed");
+    });
+    await expect(
+      cm.connect({ command: "npx", args: ["-y", "some-server"], confirmed: true }),
+    ).rejects.toThrow(/handshake failed/);
+
+    const { port, username, password } = new URL(proxyUrl);
+    const { request } = await import("node:http");
+    const outcome = await new Promise<string>((resolve) => {
+      const req = request({
+        host: "127.0.0.1",
+        port: Number(port),
+        method: "CONNECT",
+        path: "example.com:443",
+        headers: {
+          "Proxy-Authorization": "Basic " + Buffer.from(`${username}:${password}`).toString("base64"),
+        },
+      });
+      req.on("connect", (res, s) => {
+        s.destroy();
+        resolve(`still listening (${res.statusCode})`);
+      });
+      req.on("error", (e: NodeJS.ErrnoException) => resolve(e.code ?? "error"));
+      req.end();
+    });
+    expect(outcome).toBe("ECONNREFUSED");
+  });
+});

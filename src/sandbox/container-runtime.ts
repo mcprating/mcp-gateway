@@ -18,6 +18,12 @@ export interface WrappedSpawn {
    * the engine to forward them. Kept separate so callers can audit.
    */
   forwardedEnvNames: string[];
+  /**
+   * Values the caller must add to the spawn env for names this command
+   * forwards: the egress proxy URLs, which carry the proxy's credential and so
+   * do not belong on a command line other users can read with `ps`.
+   */
+  env: Record<string, string>;
 }
 
 /** Default base images by command family. Overridable via config. */
@@ -190,6 +196,8 @@ export function buildContainerCommand(
 ): WrappedSpawn {
   const images = opts.images ?? DEFAULT_IMAGES;
   const runArgs: string[] = ["run", "--rm", "-i"];
+  const env: Record<string, string> = {};
+  const forwardedEnvNames: string[] = [];
 
   // ── Hardening (always applied) ──────────────────────────────────────────
   runArgs.push("--cap-drop", "ALL");
@@ -214,10 +222,12 @@ export function buildContainerCommand(
       // succeeds; the host.docker.internal mapping lets it reach the proxy.
       if (opts.egressProxyUrl) {
         runArgs.push("--add-host", "host.docker.internal:host-gateway");
-        runArgs.push("-e", `HTTPS_PROXY=${opts.egressProxyUrl}`);
-        runArgs.push("-e", `HTTP_PROXY=${opts.egressProxyUrl}`);
-        runArgs.push("-e", `https_proxy=${opts.egressProxyUrl}`);
-        runArgs.push("-e", `http_proxy=${opts.egressProxyUrl}`);
+        // Forwarded by name: the URL carries the proxy's credential.
+        for (const name of ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"]) {
+          runArgs.push("-e", name);
+          forwardedEnvNames.push(name);
+          env[name] = opts.egressProxyUrl;
+        }
         // Don't proxy localhost / the proxy host itself.
         runArgs.push("-e", "NO_PROXY=localhost,127.0.0.1");
       }
@@ -259,7 +269,6 @@ export function buildContainerCommand(
   }
 
   // ── Environment forwarding (names only; values come from spawn env) ──────
-  const forwardedEnvNames: string[] = [];
   for (const name of manifest.env.allow) {
     runArgs.push("-e", name);
     forwardedEnvNames.push(name);
@@ -276,5 +285,5 @@ export function buildContainerCommand(
     runArgs.push(command, ...args);
   }
 
-  return { command: engine, args: runArgs, forwardedEnvNames };
+  return { command: engine, args: runArgs, forwardedEnvNames, env };
 }

@@ -321,7 +321,12 @@ L1 and logs that it did.
 ### Network allowlists: read this before relying on them
 
 Allowlists apply **only under L2.** `network: "allowlist"` starts a forward
-proxy and points the container at it via `HTTP_PROXY`/`HTTPS_PROXY`.
+proxy and points the container at it via `HTTP_PROXY`/`HTTPS_PROXY`. The proxy
+accepts only tunnels that carry a random credential generated for that
+connection, which the container receives in those variables. With Docker Desktop
+it listens on loopback. With Docker on Linux it has to listen on all interfaces,
+because the container reaches it over the bridge, and the credential is what
+keeps other machines from using it.
 
 **This filters proxy-aware clients only.** Node's fetch/undici, axios, and Python
 requests all honour those variables, which covers most real servers. A program
@@ -408,7 +413,7 @@ npm install
 npm run dev        # watch mode
 npm run typecheck
 npm run build
-npm test           # sandbox unit tests (env scoping + egress allowlist)
+npm test           # unit tests (env scoping, egress proxy, reconnect, mcp_call_tool)
 ```
 
 ## Architecture
