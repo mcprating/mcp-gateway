@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { registerSandbox } from "./sandbox.js";
 import type { CapabilityManifest } from "../sandbox/types.js";
+import type { TrustTier } from "../registry/types.js";
 
 /**
  * The handler around overrideForSet: it asks the registry for the trust tier
@@ -23,6 +24,11 @@ const REGISTRY_ONLY = {
 function setup(opts: {
   saved?: CapabilityManifest;
   live?: CapabilityManifest;
+  /** What the live connection's connect resolved, when it fell back from it. */
+  resolved?: CapabilityManifest;
+  trustTier?: TrustTier;
+  /** The registry record the live connection's connect used. */
+  registryServer?: unknown;
   getServer?: () => Promise<unknown>;
 }) {
   let handler!: Handler;
@@ -41,7 +47,15 @@ function setup(opts: {
         saveOverride,
         containerIsolation: true,
       },
-      getConnection: () => (opts.live ? { manifest: opts.live } : undefined),
+      getConnection: () =>
+        opts.live
+          ? {
+              manifest: opts.live,
+              resolvedManifest: opts.resolved,
+              trustTier: opts.trustTier ?? "unknown",
+              registryServer: opts.registryServer ?? null,
+            }
+          : undefined,
     } as never,
     { getServer } as never,
   );
@@ -50,8 +64,30 @@ function setup(opts: {
     expect(res.isError).toBeFalsy();
     return { text: res.content[0].text, saved: saveOverride.mock.calls[0]?.[0] };
   };
-  return { set, getServer };
+  const view = async () => (await handler({ action: "view", slug: "srv" })).content[0].text;
+  return { set, view, getServer };
 }
+
+const CONTAINED: CapabilityManifest = {
+  version: 1,
+  slug: "srv",
+  enforcement: "l2-container",
+  env: { allow: ["API_KEY"], inheritDefaults: true },
+  network: { mode: "none", allow: [] },
+  filesystem: { read: [], write: [] },
+  subprocess: false,
+};
+
+const ON_HOST: CapabilityManifest = { ...CONTAINED, enforcement: "l1-process" };
+
+const GITHUB_RECORD = {
+  slug: "srv",
+  qualityScore: 45,
+  authDetails: { envVars: [{ name: "GITHUB_TOKEN" }], allEnvVars: [], schemes: [] },
+};
+
+/** What connect records for CONTAINED with no Docker or Podman to run it. */
+const FELL_BACK = { live: { ...CONTAINED, enforcement: "l1-process" as const }, resolved: CONTAINED };
 
 describe("mcp_sandbox set", () => {
   it("keeps a slug the registry doesn't know in its container, as unknown", async () => {
@@ -67,13 +103,7 @@ describe("mcp_sandbox set", () => {
   });
 
   it("takes the tier and the declared env vars from the registry record", async () => {
-    const { set } = setup({
-      getServer: async () => ({
-        slug: "srv",
-        qualityScore: 45,
-        authDetails: { envVars: [{ name: "GITHUB_TOKEN" }], allEnvVars: [], schemes: [] },
-      }),
-    });
+    const { set } = setup({ getServer: async () => GITHUB_RECORD });
     const { text, saved } = await set();
     expect(saved?.enforcement).toBe("l2-container");
     expect(saved?.env.allow).toEqual(["GITHUB_TOKEN"]);
@@ -92,25 +122,59 @@ describe("mcp_sandbox set", () => {
     expect(text).toContain("envAllow");
   });
 
-  it("doesn't ask the registry when there is a saved override or a live connection", async () => {
-    const m: CapabilityManifest = {
-      version: 1,
-      slug: "srv",
-      enforcement: "l2-container",
-      env: { allow: ["API_KEY"], inheritDefaults: true },
-      network: { mode: "none", allow: [] },
-      filesystem: { read: [], write: [] },
-      subprocess: false,
+  it("changes a saved override without asking the registry", async () => {
+    const { set, getServer } = setup({ saved: CONTAINED, live: ON_HOST });
+    const { text, saved } = await set();
+    expect(getServer).not.toHaveBeenCalled();
+    expect(saved?.env.allow).toEqual(["API_KEY"]);
+    expect(text).toContain("Changed the saved override");
+  });
+
+  it("doesn't save the env names passed to a live connection's connect", async () => {
+    // What resolve() gives a connect passed env: {PASSED_AT_CONNECT}.
+    const live = { ...CONTAINED, env: { allow: ["GITHUB_TOKEN", "PASSED_AT_CONNECT"], inheritDefaults: true } };
+    const { set, getServer } = setup({ live, trustTier: "community", registryServer: GITHUB_RECORD });
+    const { text, saved } = await set();
+    expect(getServer).not.toHaveBeenCalled();
+    expect(saved?.env.allow).toEqual(["GITHUB_TOKEN"]);
+    expect(saved?.enforcement).toBe("l2-container");
+    expect(text).toContain("the defaults for this connection's trust tier, `community`");
+    expect(text).toContain("Env names passed to mcp_connect aren't saved");
+  });
+
+  it("starts from the defaults, not an override reset since the connection used it", async () => {
+    const stale: CapabilityManifest = {
+      ...ON_HOST,
+      network: { mode: "all", allow: [] },
+      filesystem: { read: [], write: ["/home/u"] },
     };
-    for (const [opts, said] of [
-      [{ saved: m }, "Changed the saved override"],
-      [{ live: m }, "Started from the live connection's manifest"],
-    ] as const) {
-      const { set, getServer } = setup(opts);
-      const { text, saved } = await set();
-      expect(getServer).not.toHaveBeenCalled();
-      expect(saved?.env.allow).toEqual(["API_KEY"]);
-      expect(text).toContain(said);
-    }
+    const { saved } = await setup({ live: stale }).set();
+    expect(saved).toMatchObject({ enforcement: "l2-container", filesystem: { read: [], write: [] } });
+  });
+
+  it("keeps the container for a connection that fell back to L1 with no engine, and says why", async () => {
+    const { set } = setup(FELL_BACK);
+    const { text, saved } = await set();
+    expect(saved).toMatchObject({
+      enforcement: "l2-container",
+      network: { mode: "allowlist", allow: ["registry.npmjs.org"] },
+    });
+    expect(text).toContain(
+      "The live connection runs as `l1-process`: no container engine (Docker or Podman) was found",
+    );
+  });
+});
+
+describe("mcp_sandbox view", () => {
+  it("shows what a fallen-back connection runs as, and what its manifest asks for", async () => {
+    const { view } = setup(FELL_BACK);
+    const text = await view();
+    expect(text).toContain("**Enforcement:** l1-process");
+    expect(text).toContain("Runs as `l1-process`: its manifest asks for `l2-container`");
+  });
+
+  it("adds nothing for a connection running what it resolved", async () => {
+    const { view } = setup({ live: CONTAINED });
+    expect(await view()).not.toContain("Runs as");
   });
 });

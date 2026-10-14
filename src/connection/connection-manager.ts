@@ -374,6 +374,7 @@ export class ConnectionManager {
       registeredPromptProxies: new Map(),
       connectedAt: new Date(),
       trustTier,
+      registryServer,
       trust: facts,
       originalParams: { ...params, slug: params.slug || slug },
       reconnectAttempts: 0,
@@ -447,7 +448,9 @@ export class ConnectionManager {
             egressFiltered: Boolean(egressProxyUrl),
           });
         } else {
-          // No engine — downgrade to L1 and record it on the manifest.
+          // No engine — downgrade to L1 and record it on the manifest, keeping
+          // the one resolved so the user can be told why it isn't contained.
+          connection.resolvedManifest = manifest;
           manifest = { ...manifest, enforcement: "l1-process" };
           log.warn("Container isolation requested but no engine available; using L1", { slug });
         }

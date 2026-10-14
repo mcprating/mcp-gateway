@@ -18,9 +18,10 @@ vi.mock("./transport-factory.js", () => ({
   createTransport: (...a: unknown[]) => createTransport(...a),
 }));
 const resolveBakedImage = vi.hoisted(() => vi.fn());
+const detectContainerEngine = vi.hoisted(() => vi.fn());
 vi.mock("../sandbox/container-runtime.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../sandbox/container-runtime.js")>()),
-  detectContainerEngine: async () => "docker",
+  detectContainerEngine: () => detectContainerEngine(),
   resolveBakedImage: (...a: unknown[]) => resolveBakedImage(...a),
 }));
 
@@ -74,11 +75,11 @@ const unratedRegistry = {
   }),
 };
 
-function manager(m: CapabilityManifest) {
+function manager(m: CapabilityManifest, registryClient: object = unratedRegistry) {
   const audit: Array<{ type: string; reason?: string }> = [];
   const cm = new ConnectionManager(
     mcpServer as never,
-    unratedRegistry as never,
+    registryClient as never,
     { isToolAllowed: () => true } as never,
     config,
   );
@@ -92,6 +93,8 @@ beforeEach(() => {
   createTransport.mockImplementation(async () => fakeTransportResult());
   resolveBakedImage.mockReset();
   resolveBakedImage.mockResolvedValue(null);
+  detectContainerEngine.mockReset();
+  detectContainerEngine.mockResolvedValue("docker");
 });
 
 describe("env passed to mcp_connect", () => {
@@ -120,6 +123,76 @@ describe("env passed to mcp_connect", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("trust", () => {
+  it("keeps the registry record a connect by slug used, for mcp_sandbox set to build defaults on", async () => {
+    const { RegistryClient } = await import("../registry/registry-client.js");
+    const record = {
+      id: "x",
+      slug: "srv",
+      name: "Srv",
+      description: null,
+      qualityScore: 45,
+      installCommand: "npx -y srv",
+      authDetails: { envVars: [{ name: "GITHUB_TOKEN" }], allEnvVars: [], schemes: [] },
+    };
+    const registry = {
+      label: "registry.test",
+      kind: "mcp-registry" as const,
+      search: async () => ({ data: [], total: 0, limit: 10, offset: 0 }),
+      getServer: async (slug: string) => (slug === "srv" ? record : null),
+      getByName: async () => null,
+      getStatus: () => ({ lastSuccessfulCall: null, lastError: null, cacheSize: 0 }),
+      clearCache: () => {},
+    };
+    resolveBakedImage.mockResolvedValue({ image: "mcp-sandbox/srv:latest", bin: "srv" });
+    const { cm } = manager(manifest({ mode: "none", allow: [] }), new RegistryClient([registry as never]));
+    await cm.connect({ slug: "srv", confirmed: true });
+
+    // 45/100 with no safety flags is [Community] by MCP Rating's rules.
+    expect(cm.getConnection("srv")).toMatchObject({ trustTier: "community", registryServer: record });
+    await cm.disconnect("srv", { removeProfile: false });
+  });
+
+  it("keeps no record for a connect by command, but the tier its package lookup gave", async () => {
+    resolveBakedImage.mockResolvedValue({ image: "mcp-sandbox/npx-some-server:latest", bin: "some-server" });
+    const known = {
+      ...unratedRegistry,
+      factsForLaunch: async () => ({ ...(await unratedRegistry.factsForLaunch()), qualityScore: 48, tier: "community" }),
+    };
+    const { cm } = manager(manifest({ mode: "none", allow: [] }), known);
+    await cm.connect({ command: "npx", args: ["-y", "some-server"], confirmed: true });
+
+    expect(cm.getConnection("npx-some-server")).toMatchObject({ trustTier: "community", registryServer: null });
+    await cm.disconnect("npx-some-server", { removeProfile: false });
+  });
+});
+
+describe("no container engine", () => {
+  it("runs at L1, and keeps the l2-container manifest it resolved for mcp_sandbox set", async () => {
+    detectContainerEngine.mockResolvedValue(null);
+    const resolved = manifest({ mode: "none", allow: [] });
+    const { cm } = manager(resolved);
+    await cm.connect({ command: "npx", args: ["-y", "some-server"], confirmed: true });
+
+    expect(createTransport.mock.calls[0][0].command).toBe("npx");
+    const conn = cm.getConnection("npx-some-server");
+    expect(conn?.manifest?.enforcement).toBe("l1-process");
+    expect(conn?.resolvedManifest).toBe(resolved);
+    await cm.disconnect("npx-some-server", { removeProfile: false });
+  });
+
+  it("records nothing extra when the container runs", async () => {
+    resolveBakedImage.mockResolvedValue({ image: "mcp-sandbox/npx-some-server:latest", bin: "some-server" });
+    const { cm } = manager(manifest({ mode: "none", allow: [] }));
+    await cm.connect({ command: "npx", args: ["-y", "some-server"], confirmed: true });
+
+    const conn = cm.getConnection("npx-some-server");
+    expect(conn?.manifest?.enforcement).toBe("l2-container");
+    expect(conn?.resolvedManifest).toBeUndefined();
+    await cm.disconnect("npx-some-server", { removeProfile: false });
   });
 });
 
