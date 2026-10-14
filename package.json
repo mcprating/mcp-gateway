@@ -1,6 +1,6 @@
 {
   "name": "@mcp-rating/gateway",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "mcpName": "io.mcprating/gateway",
   "description": "Run MCP servers without handing them the API keys in your environment, with on-demand discovery from a public MCP registry.",
   "type": "module",
@@ -61,7 +61,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "eventsource": "^4.1.0",
     "ws": "^8.19.0",
     "zod": "^4.3.6"
