@@ -116,6 +116,139 @@ export async function resolveBakedImage(
   }
 }
 
+/** Lower-cased, without a Windows .exe/.cmd suffix. */
+function commandName(command: string): string {
+  return command.toLowerCase().replace(/\.(exe|cmd)$/, "");
+}
+
+interface FetchingLauncher {
+  /** build-server-image.mjs --runtime that bakes this launcher's packages. */
+  runtime: "node" | "python";
+  /**
+   * Hosts the launcher downloads from, when DEFAULT_IMAGES ship it. Absent
+   * when they don't: python:3.12-slim has no uv or pipx, node:22-alpine has no
+   * pnpm or bun and its Yarn 1 has no dlx. Then granting network doesn't get
+   * the server started; only a baked image does.
+   */
+  downloadHosts?: string[];
+}
+
+/**
+ * Launchers that download the server package every time they start, keyed by
+ * the command plus the subcommand that does the download.
+ */
+const FETCHING_LAUNCHERS = new Map<string, FetchingLauncher>([
+  ["npx", { runtime: "node", downloadHosts: ["registry.npmjs.org"] }],
+  ["npm exec", { runtime: "node", downloadHosts: ["registry.npmjs.org"] }],
+  ["npm x", { runtime: "node", downloadHosts: ["registry.npmjs.org"] }],
+  ["pnpm dlx", { runtime: "node" }],
+  ["yarn dlx", { runtime: "node" }],
+  ["bunx", { runtime: "node" }],
+  ["uvx", { runtime: "python" }],
+  ["uv tool run", { runtime: "python" }],
+  ["pipx run", { runtime: "python" }],
+]);
+
+interface FetchingLaunch extends FetchingLauncher {
+  /** e.g. "npx", "pipx run" */
+  launcher: string;
+  /** Args after the launcher: its flags, the package, the server's own args. */
+  rest: string[];
+}
+
+function fetchingLaunch(command: string, args: string[]): FetchingLaunch | null {
+  const name = commandName(command);
+  for (let n = Math.min(2, args.length); n >= 0; n--) {
+    const launcher = [name, ...args.slice(0, n)].join(" ");
+    const entry = FETCHING_LAUNCHERS.get(launcher);
+    if (entry) return { ...entry, launcher, rest: args.slice(n) };
+  }
+  return null;
+}
+
+/** What build-server-image.mjs accepts as --package; it refuses anything else. */
+const BAKEABLE_PACKAGE = /^[@a-z0-9._/-]+$/i;
+
+/**
+ * The package a launcher fetches: the value of --package=/--from=/--spec=,
+ * else the first positional arg (which `-p pkg` and `--from pkg` also leave
+ * first). Null when there is none the build script would accept.
+ */
+function fetchedPackage(rest: string[]): string | null {
+  for (const a of rest) {
+    const flagged = /^--(?:package|from|spec)=(.+)$/.exec(a);
+    const spec = flagged ? flagged[1] : a.startsWith("-") ? null : a;
+    if (spec !== null) return BAKEABLE_PACKAGE.test(spec) ? spec : null;
+  }
+  return null;
+}
+
+const shellArg = (s: string) => (/^[\w@./-]+$/.test(s) ? s : JSON.stringify(s));
+
+/**
+ * Why a contained server can't start, when that is knowable before spawning
+ * it. Under `network: none` with no baked image, a launcher that downloads its
+ * package at start (npx, uvx, pipx run, …) can't reach the registry, and the
+ * connect only ends at the handshake timeout with nothing to say why.
+ *
+ * Returns the explanation with the ways out, or null if nothing stands in the
+ * way. `slug` must be the one resolveBakedImage was asked about, so the build
+ * command it suggests produces the image the next connect looks for.
+ */
+export function offlineStartProblem(
+  slug: string,
+  manifest: CapabilityManifest,
+  command: string,
+  args: string[],
+  bakedImage: BakedImage | null | undefined,
+): string | null {
+  if (manifest.enforcement !== "l2-container") return null;
+  if (manifest.network.mode !== "none" || bakedImage) return null;
+  const launch = fetchingLaunch(command, args);
+  if (!launch) return null;
+
+  const pkg = fetchedPackage(launch.rest);
+  const build = [
+    "node scripts/build-server-image.mjs",
+    `--slug ${shellArg(slug)}`,
+    `--package ${pkg ?? "<package>"}`,
+    ...(launch.runtime === "python" ? ["--runtime python"] : []),
+  ].join(" ");
+  const lines = [
+    `\`${launch.launcher}\` downloads ${pkg ?? "the server's package"} when it starts, but this server's sandbox allows no network and there is no pre-built image ${bakedImageName(slug)} with the package in it, so the gateway did not start it.`,
+    "",
+  ];
+
+  if (!launch.downloadHosts) {
+    lines.push(
+      `Allowing network would not help: the container's base image, ${selectImage(command)}, has no \`${launch.launcher}\`. Build the image once, from a clone of the mcp-gateway repo, then call mcp_connect again. The server then runs with no network at all:`,
+      `   ${build}`,
+    );
+    return lines.join("\n");
+  }
+
+  // mcp_sandbox "set" on a server with no saved override starts from an
+  // l1-process baseline with no env grants, so spell out what must survive:
+  // the container, and the env names this server was already allowed.
+  const hosts = launch.downloadHosts;
+  const sandboxArgs = [
+    `action: "set"`,
+    `slug: ${JSON.stringify(slug)}`,
+    `enforcement: "l2-container"`,
+    `network: "allowlist"`,
+    `networkAllow: ${JSON.stringify(hosts)}`,
+    ...(manifest.env.allow.length > 0 ? [`envAllow: ${JSON.stringify(manifest.env.allow)}`] : []),
+  ];
+  lines.push(
+    "Either, then call mcp_connect again:",
+    "1. Build the image once, from a clone of the mcp-gateway repo. The server then runs with no network at all:",
+    `   ${build}`,
+    `2. Or let this server reach ${hosts.join(", ")}, still inside its container:`,
+    `   mcp_sandbox({${sandboxArgs.join(", ")}})`,
+  );
+  return lines.join("\n");
+}
+
 /**
  * Choose a base image for the given command.
  *  - npx / npm / node / yarn / pnpm  → node image
@@ -126,7 +259,7 @@ export function selectImage(
   command: string,
   images: ContainerImages = DEFAULT_IMAGES,
 ): string {
-  const c = command.toLowerCase().replace(/\.(exe|cmd)$/, "");
+  const c = commandName(command);
   if (["npx", "npm", "node", "yarn", "pnpm"].includes(c)) return images.node;
   if (["uvx", "uv", "python", "python3", "pip", "pip3"].includes(c)) return images.python;
   return images.default;
@@ -181,9 +314,11 @@ function bakedRunCommand(
     return { cmd: command, cmdArgs: args };
   }
   // Pass through args that came AFTER the package token. The package token is
-  // the first non-flag arg (e.g. "@scope/pkg"); npx flags like -y precede it.
-  const pkgIdx = args.findIndex((a) => !a.startsWith("-"));
-  const passThrough = pkgIdx >= 0 ? args.slice(pkgIdx + 1) : [];
+  // the first non-flag arg (e.g. "@scope/pkg") after any launcher subcommand
+  // (`pipx run`, `npm exec`); npx flags like -y precede it.
+  const rest = fetchingLaunch(command, args)?.rest ?? args;
+  const pkgIdx = rest.findIndex((a) => !a.startsWith("-"));
+  const passThrough = pkgIdx >= 0 ? rest.slice(pkgIdx + 1) : [];
   return { cmd: baked.bin, cmdArgs: passThrough };
 }
 

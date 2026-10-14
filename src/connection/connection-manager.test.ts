@@ -13,10 +13,11 @@ const createTransport = vi.hoisted(() => vi.fn());
 vi.mock("./transport-factory.js", () => ({
   createTransport: (...a: unknown[]) => createTransport(...a),
 }));
+const resolveBakedImage = vi.hoisted(() => vi.fn());
 vi.mock("../sandbox/container-runtime.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../sandbox/container-runtime.js")>()),
   detectContainerEngine: async () => "docker",
-  resolveBakedImage: async () => null,
+  resolveBakedImage: (...a: unknown[]) => resolveBakedImage(...a),
 }));
 
 const { ConnectionManager } = await import("./connection-manager.js");
@@ -76,10 +77,25 @@ function manager(m: CapabilityManifest) {
 beforeEach(() => {
   createTransport.mockReset();
   createTransport.mockImplementation(async () => fakeTransportResult());
+  resolveBakedImage.mockReset();
+  resolveBakedImage.mockResolvedValue(null);
+});
+
+describe("network:none without a baked image", () => {
+  it("refuses npx before spawning anything, since it could not fetch the package", async () => {
+    const { cm } = manager(manifest({ mode: "none", allow: [] }));
+    await expect(
+      cm.connect({ command: "npx", args: ["-y", "some-server"], confirmed: true }),
+    ).rejects.toThrow(/did not start it[\s\S]*build-server-image\.mjs --slug npx-some-server --package some-server/);
+    expect(createTransport).not.toHaveBeenCalled();
+    expect(cm.getConnection("npx-some-server")).toBeUndefined();
+  });
 });
 
 describe("auto-reconnect", () => {
   it("restarts a crashed server inside the same container with the same scoped env", async () => {
+    // Under network:none, npx only starts from a baked image.
+    resolveBakedImage.mockResolvedValue({ image: "mcp-sandbox/npx-some-server:latest", bin: "some-server" });
     const { cm, audit } = manager(manifest({ mode: "none", allow: [] }));
     await cm.connect({ command: "npx", args: ["-y", "some-server"], confirmed: true });
 
