@@ -78,6 +78,13 @@ export function registerServerInfo(
 
           lines.push(registryData.source ? `### Registry Info (${registryData.source})` : "### Registry Info");
           lines.push(`**Quality Score:** ${score} · **Trust:** [${tierLabel}]`);
+          if (registryData.rating) {
+            lines.push(`**Rated by:** ${registryData.rating.by}, as the same package: ${registryData.rating.url}`);
+          }
+          if (registryData.delistedReason) {
+            lines.push(`⛔ ${registryData.rating?.by ?? "MCP Rating"}: ${registryData.delistedReason}`);
+          }
+          if (registryData.trustWarning) lines.push(`⚠️ ${registryData.trustWarning}`);
 
           if (breakdown) {
             lines.push(
