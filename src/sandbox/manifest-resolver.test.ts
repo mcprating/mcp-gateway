@@ -226,6 +226,18 @@ describe("overrideForSet", () => {
     expect(m).toEqual(tierDefaults("npx-srv", "unknown", { containerIsolation: true }));
   });
 
+  it("takes the tier the latest connect attempt worked out, as for a live connection", () => {
+    // A command whose package MCP Rating rates: the connect judged it as the package.
+    const { manifest: m, start } = overrideForSet(
+      "npx-srv",
+      {},
+      { lookup: { status: "last-connect", trustTier: "trusted", server: null } },
+      true,
+    );
+    expect(m).toEqual(tierDefaults("npx-srv", "trusted", { containerIsolation: true }));
+    expect(start).toEqual({ from: "defaults", trustTier: "trusted", lookup: "last-connect" });
+  });
+
   it("keeps the container for a server whose connection fell back to L1, since its defaults ask for one", () => {
     const lookup = { status: "connection", trustTier: "unknown", server: null } as const;
     expect(overrideForSet("srv", REGISTRY_ONLY, { lookup }, true).manifest.enforcement).toBe("l2-container");

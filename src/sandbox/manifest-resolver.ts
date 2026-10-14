@@ -158,8 +158,13 @@ export function containmentRemedy(opts: {
 export type TrustLookup =
   /** The tier and registry record (null if none) the live connection's connect used. */
   | { status: "connection"; trustTier: TrustTier; server: RegistryServer | null }
+  /** The same, from the latest connect attempt, when nothing is connected. */
+  | { status: "last-connect"; trustTier: TrustTier; server: RegistryServer | null }
   | { status: "found"; server: RegistryServer; trustTier: TrustTier }
-  /** Not a registry slug: what connects by command or URL produce. */
+  /**
+   * Not a registry slug: what a connect by command or URL produces, whose
+   * tier then comes from what MCP Rating knows of the package it runs.
+   */
   | { status: "not-found" }
   | { status: "unreachable" };
 
@@ -220,10 +225,14 @@ export type OverrideStart =
  * later connect, from the gateway's environment; it may run as l1-process for
  * want of a container engine; and it may come from an override since reset.
  *
- * Otherwise the tier comes from the registry. A slug it doesn't have gets
- * "unknown", as a connect by command or URL does; so does one it couldn't be
- * asked about, since the most locked-down tier is the only honest guess. The
- * caller needs `lookup` only when there is no saved override.
+ * With nothing connected, the latest connect attempt says the same, even a
+ * refused or failed one. Otherwise the tier comes from the registry. A slug it
+ * doesn't have gets "unknown": it is most likely made from a command, whose
+ * connect takes its tier from MCP Rating's record of the package it runs,
+ * and the package can't be recovered from the slug. So does a slug the
+ * registry couldn't be asked about, since the most locked-down tier is the
+ * only honest guess. The caller needs `lookup` only when there is no saved
+ * override.
  */
 export function overrideForSet(
   slug: string,
@@ -241,7 +250,10 @@ export function overrideForSet(
     start = { from: "override" };
   } else {
     const lookup: TrustLookup = current.lookup ?? { status: "unreachable" };
-    const known = lookup.status === "found" || lookup.status === "connection" ? lookup : null;
+    const known =
+      lookup.status === "found" || lookup.status === "connection" || lookup.status === "last-connect"
+        ? lookup
+        : null;
     const trustTier = known?.trustTier ?? "unknown";
     base = tierDefaults(slug, trustTier, {
       containerIsolation,

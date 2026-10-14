@@ -33,6 +33,8 @@ function setup(opts: {
   containerIsolation?: boolean;
   /** The slug the saved override and the live connection are filed under. */
   at?: string;
+  /** What the latest connect attempt for that slug worked out (lastTrust). */
+  attempt?: { trustTier: TrustTier; registryServer: unknown };
   getServer?: (ref: string) => Promise<unknown>;
 }) {
   let handler!: Handler;
@@ -63,6 +65,7 @@ function setup(opts: {
               registryServer: opts.registryServer ?? null,
             }
           : undefined,
+      lastTrust: (slug: string) => (slug === at ? opts.attempt : undefined),
     } as never,
     { getServer } as never,
   );
@@ -107,6 +110,32 @@ describe("mcp_sandbox set", () => {
     });
     expect(text).toContain("isn't a registry slug");
     expect(text).toContain("`unknown` trust tier");
+    // Not "as a connect by command gets": since 0.4.0 that takes the package's tier.
+    expect(text).not.toContain("which a connect by command or URL also gets");
+    expect(text).toContain("try mcp_connect once (even a refused or failed attempt records the tier)");
+  });
+
+  /**
+   * A slug made from a command (npx-chrome-devtools-mcp) isn't in any
+   * registry, and can't be turned back into the package a connect by that
+   * command is judged by. The latest connect attempt worked the tier out.
+   */
+  it("builds on the tier the last connect attempt worked out, with nothing connected", async () => {
+    const { set, getServer } = setup({ attempt: { trustTier: "verified", registryServer: null } });
+    const { text, saved } = await set();
+    expect(getServer).not.toHaveBeenCalled();
+    // verified's defaults, not unknown's: no container, subprocesses allowed.
+    expect(saved).toMatchObject({ enforcement: "l1-process", subprocess: true, env: { allow: [] } });
+    expect(text).toContain("the trust tier its last connect attempt worked out, `verified`");
+  });
+
+  it("prefers a live connection to the last attempt", async () => {
+    const { saved } = await setup({
+      live: ON_HOST,
+      trustTier: "community",
+      attempt: { trustTier: "verified", registryServer: null },
+    }).set();
+    expect(saved?.enforcement).toBe("l2-container");
   });
 
   it("takes the tier and the declared env vars from the registry record", async () => {

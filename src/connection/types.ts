@@ -126,6 +126,16 @@ export interface DownstreamConnection {
   lastPingAt?: Date;
 }
 
+/**
+ * The trust a connect worked out for a server: its tier, and the registry
+ * record it came from (null for a command or bare URL, whose tier comes from
+ * what MCP Rating knows of the package it runs).
+ */
+export interface ConnectTrust {
+  trustTier: TrustTier;
+  registryServer: RegistryServer | null;
+}
+
 // ── Connect Parameters ───────────────────────────────────────────────────────
 
 /** What createTransport is called with for a connection; see DownstreamConnection.launch. */

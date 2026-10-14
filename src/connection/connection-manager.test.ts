@@ -168,6 +168,23 @@ describe("trust", () => {
     expect(cm.getConnection("npx-some-server")).toMatchObject({ trustTier: "community", registryServer: null });
     await cm.disconnect("npx-some-server", { removeProfile: false });
   });
+
+  it("remembers the tier a connect worked out even when it is refused, for mcp_sandbox set", async () => {
+    const known = {
+      ...unratedRegistry,
+      factsForLaunch: async () => ({ ...(await unratedRegistry.factsForLaunch()), qualityScore: 48, tier: "community" }),
+    };
+    const { cm } = manager(manifest({ mode: "none", allow: [] }), known);
+    expect(cm.lastTrust("npx-some-server")).toBeUndefined();
+
+    // No baked image under network:none: refused before anything starts.
+    await expect(
+      cm.connect({ command: "npx", args: ["-y", "some-server"], confirmed: true }),
+    ).rejects.toThrow(/did not start it/);
+
+    expect(cm.getConnection("npx-some-server")).toBeUndefined();
+    expect(cm.lastTrust("npx-some-server")).toEqual({ trustTier: "community", registryServer: null });
+  });
 });
 
 describe("no container engine", () => {
