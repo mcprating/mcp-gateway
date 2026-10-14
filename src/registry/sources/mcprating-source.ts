@@ -17,6 +17,10 @@ export interface LookupRecord {
   verification: RegistryServer["verification"];
   /** Every key that server answers to. */
   keys: string[];
+  /** The tier MCP Rating shows, safety cap included. Absent from MCP Rating before 2026-10-14. */
+  trustTier?: import("../types.js").TrustTier;
+  /** Last release and code push. Absent from MCP Rating before 2026-10-14. */
+  maintenance?: import("../trust-facts.js").Maintenance;
 }
 
 /**
@@ -35,6 +39,11 @@ export class McpRatingSource extends HttpRegistrySource implements RegistrySourc
   ) {
     super(cacheTtlMs, partnerKey ? { "x-partner-key": partnerKey } : {});
     this.label = labelFor(baseUrl);
+  }
+
+  /** The site a server's page is on: the API URL without its /api/v1. */
+  get siteUrl(): string {
+    return this.baseUrl.replace(/\/api\/v1\/?$/, "");
   }
 
   async search(query: string, options?: SearchOptions): Promise<RegistryListResponse> {

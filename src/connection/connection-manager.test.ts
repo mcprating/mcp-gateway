@@ -65,11 +65,20 @@ function manifest(network: CapabilityManifest["network"]): CapabilityManifest {
   };
 }
 
+/** A registry client that rates nothing: these tests are about the sandbox. */
+const unratedRegistry = {
+  ratesPackages: false,
+  factsForLaunch: async () => ({
+    by: null, consulted: false, url: null, qualityScore: null, tier: "unknown", safetyScore: null,
+    safetyFlags: [], verification: null, maintenance: null, delistedReason: null, trustWarning: null,
+  }),
+};
+
 function manager(m: CapabilityManifest) {
   const audit: Array<{ type: string; reason?: string }> = [];
   const cm = new ConnectionManager(
     mcpServer as never,
-    {} as never,
+    unratedRegistry as never,
     { isToolAllowed: () => true } as never,
     config,
   );
@@ -267,7 +276,74 @@ describe("a rating warning on connect", () => {
     // isVerified would make it [Verified] and skip confirmation — the warning still stops it.
     const result = await cm.connect({ slug: "io.github.ChromeDevTools/chrome-devtools-mcp" });
     expect(result).toMatchObject({ needsConfirmation: true });
-    expect((result as { warning: string }).warning).toMatch(/^⚠️ MCP Rating knows io\.github\.ChromeDevTools\/chrome-devtools-mcp as npm:chrome-devtools-mcp/);
+    const warning = (result as { warning: string }).warning;
+    expect(warning).toMatch(/^\*\*What MCP Rating knows about Chrome DevTools:\*\*/);
+    expect(warning).toMatch(/⚠️ MCP Rating knows io\.github\.ChromeDevTools\/chrome-devtools-mcp as npm:chrome-devtools-mcp/);
     expect(createTransport).not.toHaveBeenCalled();
+  });
+});
+
+describe("trust data at connect", () => {
+  const known = {
+    by: "mcprating.io", consulted: true, url: "https://mcprating.io/servers/known-pkg", qualityScore: 71,
+    tier: "trusted" as const, safetyScore: 90, safetyFlags: [] as string[], verification: null, maintenance: null,
+    delistedReason: null, trustWarning: null,
+  };
+  const unknownFacts = { ...known, by: null, url: null, qualityScore: null, tier: "unknown" as const, safetyScore: null };
+
+  function cmWith(facts: typeof known | typeof unknownFacts, opts: { min?: number; rates?: boolean } = {}) {
+    const registry = {
+      ratesPackages: opts.rates ?? true,
+      registries: [{ label: "mcprating.io", kind: "mcprating" }],
+      factsForLaunch: async () => facts,
+    };
+    return new ConnectionManager(
+      mcpServer as never,
+      registry as never,
+      { isToolAllowed: () => true } as never,
+      { ...config, minQualityScore: opts.min } as GatewayConfig,
+    );
+  }
+
+  it("connects a known package started by command as itself, and keeps what was known", async () => {
+    const cm = cmWith(known);
+    const summary = await cm.connect({ command: "npx", args: ["-y", "known-pkg"] });
+    expect(summary).toMatchObject({ trustTier: "trusted", trust: { by: "mcprating.io", qualityScore: 71 } });
+    expect(createTransport).toHaveBeenCalledOnce();
+    await cm.disconnect((summary as { slug: string }).slug, { removeProfile: false });
+  });
+
+  it("asks first when safety is in the risk band, whatever the tier, and says why", async () => {
+    const cm = cmWith({ ...known, safetyScore: 40, safetyFlags: ["abandoned"] });
+    const result = await cm.connect({ command: "npx", args: ["-y", "known-pkg"] });
+    const warning = (result as { warning: string }).warning;
+    expect(warning).toMatch(/Safety: 40\/100 \(risk\)\.\n- abandoned: No activity for over a year/);
+    expect(warning).toMatch(/risk band \(40\/100\)/);
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it("refuses below the minimum score, and confirmed: true doesn't lift it", async () => {
+    const cm = cmWith({ ...known, qualityScore: 55 }, { min: 60 });
+    await expect(cm.connect({ command: "npx", args: ["-y", "known-pkg"], confirmed: true })).rejects.toThrow(
+      /minimum score rule \(at least 60\/100\): "npx-known-pkg" scores 55\/100\. Only the gateway's configuration/,
+    );
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it("refuses what MCP Rating hasn't scored, and everything when MCP Rating isn't configured", async () => {
+    await expect(cmWith(unknownFacts, { min: 30 }).connect({ command: "node", args: ["server.js"], confirmed: true })).rejects.toThrow(
+      /has no MCP Rating score/,
+    );
+    await expect(cmWith(known, { min: 30, rates: false }).connect({ command: "npx", args: ["known-pkg"], confirmed: true })).rejects.toThrow(
+      /needs MCP Rating among the registries/,
+    );
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it("lets through what meets the minimum", async () => {
+    const cm = cmWith(known, { min: 70 });
+    const summary = await cm.connect({ command: "npx", args: ["-y", "known-pkg"] });
+    expect(createTransport).toHaveBeenCalledOnce();
+    await cm.disconnect((summary as { slug: string }).slug, { removeProfile: false });
   });
 });

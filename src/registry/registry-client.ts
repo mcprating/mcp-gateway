@@ -11,6 +11,8 @@ import type {
 import type { RegistrySource, RegistryStatus, SearchOptions } from "./sources/http-source.js";
 import { McpRatingSource, type LookupRecord } from "./sources/mcprating-source.js";
 import { lookupKeys } from "./package-keys.js";
+import { launchKeys } from "./launch-keys.js";
+import { maintenanceFacts, type TrustFacts } from "./trust-facts.js";
 import { McpRegistrySource } from "./sources/mcp-registry-source.js";
 
 export type { RegistryStatus } from "./sources/http-source.js";
@@ -247,6 +249,7 @@ export class RegistryClient {
           r.verification = rec.verification;
           r.stars = rec.stars;
           r.weeklyDownloads = rec.weeklyDownloads;
+          if (rec.maintenance) r.maintenance = rec.maintenance;
         }
       }
       const named = k.name ? records.get(k.name) : null;
@@ -256,6 +259,74 @@ export class RegistryClient {
           `MCP Rating knows ${r.registryName} as ${theirs}; this registry's entry of that name runs ${k.packages.join(", ")}.`;
       }
     }
+  }
+
+  /** The MCP Rating registry, if one is configured: the only source of scores. */
+  private get rater(): McpRatingSource | undefined {
+    return this.sources.find((s): s is McpRatingSource => s instanceof McpRatingSource);
+  }
+
+  /** Whether scores can be had at all: MCP Rating is one of the registries. */
+  get ratesPackages(): boolean {
+    return !!this.rater;
+  }
+
+  /** What MCP Rating knows about a server a registry returned (rated by rate() if it came from elsewhere). */
+  factsFor(server: RegistryServer): TrustFacts {
+    const rater = this.rater;
+    const ours = !!rater && server.source === rater.label;
+    const by = ours ? rater.label : server.rating?.by ?? null;
+    return {
+      by,
+      consulted: !!rater,
+      url: ours ? `${rater.siteUrl}/servers/${encodeURIComponent(server.slug)}` : server.rating?.url ?? null,
+      qualityScore: server.qualityScore ?? null,
+      tier: RegistryClient.determineTrustTier(server),
+      safetyScore: server.safetyScore ?? null,
+      safetyFlags: server.safetyFlags ?? [],
+      verification: server.verification ?? null,
+      maintenance: server.maintenance ?? (ours ? maintenanceFacts(server) : null),
+      delistedReason: server.delistedReason ?? null,
+      trustWarning: server.trustWarning ?? null,
+    };
+  }
+
+  /**
+   * What MCP Rating knows about the package an explicit launch would run
+   * (`npx pkg`, `uvx pkg`, `docker run image`, a URL) — so a known package
+   * started by command is judged as itself, not as "unknown". Best effort.
+   */
+  async factsForLaunch(launch: { command?: string; args?: string[]; url?: string }): Promise<TrustFacts> {
+    const rater = this.rater;
+    const none: TrustFacts = {
+      by: null, consulted: !!rater, url: null, qualityScore: null, tier: "unknown", safetyScore: null,
+      safetyFlags: [], verification: null, maintenance: null, delistedReason: null, trustWarning: null,
+    };
+    const keys = launchKeys(launch);
+    if (!rater || keys.length === 0) return none;
+    let records: Map<string, LookupRecord | null>;
+    try {
+      records = await withDeadline(rater.lookup(keys), this.ratingDeadlineMs);
+    } catch (err) {
+      log.warn("MCP Rating lookup failed; the launch stays unrated", { error: String(err) });
+      return none;
+    }
+    const rec = keys.map((k) => records.get(k)).find((x): x is LookupRecord => !!x);
+    if (!rec) return none;
+    const delisted = !!rec.delistedReason;
+    return {
+      by: rater.label,
+      consulted: true,
+      url: rec.url,
+      qualityScore: delisted ? null : rec.qualityScore,
+      tier: delisted ? "unknown" : rec.trustTier ?? "unknown",
+      safetyScore: rec.safetyScore,
+      safetyFlags: rec.safetyFlags,
+      verification: rec.verification,
+      maintenance: rec.maintenance ?? null,
+      delistedReason: rec.delistedReason,
+      trustWarning: null,
+    };
   }
 
   /**
@@ -353,23 +424,26 @@ export class RegistryClient {
    * gateway is a separately-published package and can't import from the root.
    */
   static determineTrustTier(server: RegistryServer): TrustTier {
-    if (
-      server.isVerified ||
-      (server.isOfficial && (server.qualityScore ?? 0) >= 80)
-    ) {
-      return "verified";
+    const score = server.qualityScore ?? 0;
+    let tier: TrustTier;
+    if (server.isVerified || (server.isOfficial && score >= 80)) {
+      tier = "verified";
+    } else if (score >= 60 && server.repositoryUrl && server.installCommand) {
+      tier = "trusted";
+    } else if (score >= 30) {
+      tier = "community";
+    } else {
+      tier = "unknown";
     }
-    if (
-      (server.qualityScore ?? 0) >= 60 &&
-      server.repositoryUrl &&
-      server.installCommand
-    ) {
-      return "trusted";
+    // Safety cap, as MCP Rating applies it (the gateway didn't, before 0.4.0): a
+    // server whose safety score is in the risk band is at most [Community], and
+    // below 30 it is [Unverified], however good the rest of it looks.
+    const safety = server.safetyScore;
+    if (safety !== null && safety !== undefined) {
+      if (safety < 30) tier = "unknown";
+      else if (safety < 50 && (tier === "verified" || tier === "trusted")) tier = "community";
     }
-    if ((server.qualityScore ?? 0) >= 30) {
-      return "community";
-    }
-    return "unknown";
+    return tier;
   }
 
   /** Reachability across all registries, and of each, for diagnostics. */

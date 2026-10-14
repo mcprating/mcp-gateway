@@ -255,7 +255,38 @@ Every connected server is labeled with a trust tier based on its MCP-Rating qual
 - **[Verified]** — High quality + officially verified
 - **[Trusted]** — Good quality with repository and install command
 - **[Community]** — Listed in registry with basic quality
-- **[Unverified]** — Unknown origin (manually connected), or from another registry that MCP Rating hasn't rated
+- **[Unverified]** — A package MCP Rating doesn't know, from any registry or started by command
+
+A safety score in the risk band caps the tier, as it does on the site: below 50
+a server is at most [Community], below 30 it is [Unverified].
+
+### What `mcp_connect` shows, and when it asks first
+
+Before anything starts, `mcp_connect` looks up what MCP Rating knows about the
+package that would run — from the registry entry, or, for an explicit `command`
+or `url`, from the package itself (`npx pkg`, `uvx pkg`, `docker run image`,
+the endpoint). A known package started by command is judged as itself, not as
+[Unverified]. Shown in the confirmation and again once connected:
+
+- score and trust tier, with the server's page;
+- safety score and each flag with its reason;
+- MCP Rating's own start test: started, didn't start, needs credentials, or not tested;
+- last release and last code push, with where each date comes from.
+
+It asks for confirmation for a [Community] or [Unverified] server, and, whatever
+the tier, when the safety score is in the risk band, MCP Rating has delisted the
+package, or a registry name points at a different package than MCP Rating knows
+by that name.
+
+### A minimum score
+
+`MCP_GATEWAY_MIN_SCORE=60` (or `"minQualityScore": 60` in `config.json`) refuses
+to connect anything MCP Rating scores below 60, or hasn't scored — by slug,
+registry name, command or URL alike, so a local `node server.js` is refused too.
+`confirmed: true` doesn't lift it, since an agent can set that itself; only the
+setting does. It needs MCP Rating among the registries. A value that isn't a
+whole number from 0 to 100 refuses everything until it is fixed, rather than
+quietly meaning "no rule".
 
 ## Registries
 
@@ -326,6 +357,7 @@ The gateway reads config from `~/.mcp-gateway/config.json`:
 |----------|-------------|---------|
 | `MCP_GATEWAY_REGISTRY_URL` | MCP-Rating API base URL | `https://mcprating.io/api/v1` |
 | `MCP_GATEWAY_REGISTRIES` | Comma-separated registries to search instead (see [Registries](#registries)) | MCP Rating alone |
+| `MCP_GATEWAY_MIN_SCORE` | Refuse anything MCP Rating scores below this, or hasn't scored (see [A minimum score](#a-minimum-score)) | no rule |
 | `MCP_GATEWAY_TIMEOUT` | Proxy timeout (ms) | `30000` |
 | `MCP_GATEWAY_MAX_CONNECTIONS` | Max simultaneous connections | `10` |
 | `MCP_GATEWAY_LOG_LEVEL` | Log level (debug/info/warn/error) | `info` |

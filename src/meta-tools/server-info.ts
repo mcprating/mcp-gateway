@@ -6,6 +6,7 @@ import { TRUST_LABELS } from "../permissions/trust-tiers.js";
 import { namespaceTool } from "../proxy/tool-router.js";
 import { detectLiveUi } from "../proxy/ui-detect.js";
 import { toolError } from "../utils/errors.js";
+import { trustBullets } from "./connect.js";
 
 export function registerServerInfo(
   server: McpServer,
@@ -78,13 +79,8 @@ export function registerServerInfo(
 
           lines.push(registryData.source ? `### Registry Info (${registryData.source})` : "### Registry Info");
           lines.push(`**Quality Score:** ${score} · **Trust:** [${tierLabel}]`);
-          if (registryData.rating) {
-            lines.push(`**Rated by:** ${registryData.rating.by}, as the same package: ${registryData.rating.url}`);
-          }
-          if (registryData.delistedReason) {
-            lines.push(`⛔ ${registryData.rating?.by ?? "MCP Rating"}: ${registryData.delistedReason}`);
-          }
-          if (registryData.trustWarning) lines.push(`⚠️ ${registryData.trustWarning}`);
+          // The same block mcp_connect shows: safety, start test, upkeep.
+          lines.push("", "**What MCP Rating knows:**", ...trustBullets(registryClient.factsFor(registryData)), "");
 
           if (breakdown) {
             lines.push(

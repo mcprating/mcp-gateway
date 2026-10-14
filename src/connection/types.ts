@@ -3,6 +3,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { TrustTier } from "../registry/types.js";
 import type { CapabilityManifest } from "../sandbox/types.js";
 import type { EgressProxy } from "../sandbox/egress-proxy.js";
+import type { TrustFacts } from "../registry/trust-facts.js";
 
 // ── Transport Types ──────────────────────────────────────────────────────────
 
@@ -82,6 +83,9 @@ export interface DownstreamConnection {
   trustTier: TrustTier;
   serverInfo?: { name: string; version: string };
 
+  /** What MCP Rating knew about it when it was connected. */
+  trust?: TrustFacts;
+
   /** Resolved sandbox capability manifest (L1+) for this connection */
   manifest?: CapabilityManifest;
 
@@ -151,6 +155,7 @@ export interface ConnectionSummary {
   promptCount: number;
   connectedAt: Date;
   serverInfo?: { name: string; version: string };
+  trust?: TrustFacts;
   reconnectAttempts?: number;
   failedPings?: number;
   lastPingAt?: Date;
