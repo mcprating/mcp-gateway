@@ -122,6 +122,23 @@ describe("ManifestResolver.resolve with a saved override", () => {
     expect(resolver.getOverride("srv")?.env.allow).toEqual([]);
     expect(new ManifestResolver(file, true).getOverride("srv")?.env.allow).toEqual([]);
   });
+
+  it("lists overrides filed under a registry name, from the file, until each is cleared", () => {
+    const file = join(dir, "manifests.json");
+    const resolver = new ManifestResolver(file, true);
+    // What mcp_sandbox "set" by name saved before it resolved names to slugs.
+    resolver.saveOverride(manifest({ slug: "io.github.acme/srv" }));
+    resolver.saveOverride(manifest({ slug: "srv" }));
+
+    const reloaded = new ManifestResolver(file, true);
+    expect(reloaded.nameKeyedOverrides()).toEqual(["io.github.acme/srv"]);
+    // A connect never applies it: connects look overrides up by slug.
+    expect(reloaded.resolve("io-github-acme-srv", "unknown")).toEqual(
+      tierDefaults("io-github-acme-srv", "unknown", { containerIsolation: true }),
+    );
+    reloaded.clearOverride("io.github.acme/srv");
+    expect(new ManifestResolver(file, true).nameKeyedOverrides()).toEqual([]);
+  });
 });
 
 describe("overrideForSet", () => {

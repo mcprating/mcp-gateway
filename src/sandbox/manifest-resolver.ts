@@ -169,6 +169,15 @@ export type TrustLookup =
   | { status: "unreachable" };
 
 /**
+ * A registry name (`io.github.owner/server`) rather than a slug. Slugs are
+ * tool-name-safe and never have a "/"; RegistryClient.getServer looks a ref
+ * with one up by name.
+ */
+export function isRegistryName(ref: string): boolean {
+  return ref.includes("/");
+}
+
+/**
  * The slug mcp_sandbox files a server's override under: the one a connect
  * gives it. A registry name (`io.github.owner/server`: anything with a "/")
  * becomes the slug of the server the registry has under it, as connect does,
@@ -184,7 +193,7 @@ export function overrideSlug(
   ref: string,
   byName?: TrustLookup,
 ): { slug: string } | { error: string } {
-  if (!ref.includes("/")) return { slug: ref };
+  if (!isRegistryName(ref)) return { slug: ref };
   if (byName?.status === "found") return { slug: byName.server.slug };
   if (byName?.status === "not-found") {
     return {
@@ -346,6 +355,16 @@ export class ManifestResolver {
   /** Remove a saved override, reverting to trust-tier defaults. */
   clearOverride(slug: string): void {
     if (this.overrides.delete(slug)) this.saveToDisk();
+  }
+
+  /**
+   * Overrides filed under a registry name instead of a slug. mcp_sandbox
+   * saved them that way before it resolved names (overrideSlug), and no
+   * connect ever applied one, since a connect looks overrides up by slug.
+   * They stay until removed by that name; this is how they're found.
+   */
+  nameKeyedOverrides(): string[] {
+    return [...this.overrides.keys()].filter(isRegistryName);
   }
 
   /**

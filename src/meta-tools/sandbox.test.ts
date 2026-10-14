@@ -35,6 +35,8 @@ function setup(opts: {
   at?: string;
   /** What the latest connect attempt for that slug worked out (lastTrust). */
   attempt?: { trustTier: TrustTier; registryServer: unknown };
+  /** Other overrides in the file, by key: e.g. one saved under a registry name. */
+  filed?: Record<string, CapabilityManifest>;
   getServer?: (ref: string) => Promise<unknown>;
 }) {
   let handler!: Handler;
@@ -44,16 +46,21 @@ function setup(opts: {
     },
   };
   const at = opts.at ?? "srv";
+  const file: Record<string, CapabilityManifest> = { ...opts.filed };
+  if (opts.saved) file[at] = opts.saved;
   const saveOverride = vi.fn<(m: CapabilityManifest) => void>();
-  const clearOverride = vi.fn<(slug: string) => void>();
+  const clearOverride = vi.fn((slug: string) => {
+    delete file[slug];
+  });
   const getServer = vi.fn(opts.getServer ?? (async () => null));
   registerSandbox(
     server as never,
     {
       manifestResolver: {
-        getOverride: (slug: string) => (slug === at ? opts.saved : undefined),
+        getOverride: (slug: string) => file[slug],
         saveOverride,
         clearOverride,
+        nameKeyedOverrides: () => Object.keys(file).filter((k) => k.includes("/")),
         containerIsolation: opts.containerIsolation ?? true,
       },
       getConnection: (slug: string) =>
@@ -293,5 +300,76 @@ describe("mcp_sandbox with a registry name", () => {
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toContain("No registry answered: try again, or pass the slug");
     expect(saveOverride).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Before names were resolved, set by name saved under the name itself. No
+   * connect applied such an override, and since names resolve to slugs,
+   * nothing reached it either: it sat in the file for good.
+   */
+  describe("an override saved under the name itself, from before", () => {
+    const OLD: CapabilityManifest = {
+      ...CONTAINED,
+      slug: NAME,
+      network: { mode: "all", allow: [] },
+      filesystem: { read: [], write: ["/home/u"] },
+    };
+
+    it("is shown by view, with what it said and that it was never applied", async () => {
+      const text = await setup({ getServer: byName, filed: { [NAME]: OLD } }).view(NAME);
+      expect(text).toContain(`Still in the overrides file: the override saved under the name \`${NAME}\` itself`);
+      expect(text).toContain("which no connect ever applied");
+      expect(text).toContain('"network":{"mode":"all","allow":[]}');
+    });
+
+    it("is removed by reset, along with the slug's", async () => {
+      const { call, clearOverride } = setup({ getServer: byName, filed: { [NAME]: OLD } });
+      const res = await call({ action: "reset", slug: NAME });
+      expect(clearOverride.mock.calls).toEqual([[SLUG], [NAME]]);
+      expect(res.content[0].text).toContain(`Also removed the override saved under the name \`${NAME}\` itself`);
+    });
+
+    it("is removed by reset even when the name no longer resolves", async () => {
+      const GONE = "io.github.gone/srv";
+      const { call, clearOverride } = setup({ getServer: byName, filed: { [GONE]: { ...OLD, slug: GONE } } });
+      const res = await call({ action: "reset", slug: GONE });
+      expect(res.isError).toBeFalsy();
+      expect(clearOverride.mock.calls).toEqual([[GONE]]);
+      expect(res.content[0].text).toContain("Nothing filed under a slug was touched");
+      // view still shows it rather than only the error.
+      const { view } = setup({ getServer: byName, filed: { [GONE]: { ...OLD, slug: GONE } } });
+      expect(await view(GONE)).toContain("Still in the overrides file");
+    });
+
+    it("is replaced by set, which doesn't start from it", async () => {
+      const { set, clearOverride } = setup({ getServer: byName, filed: { [NAME]: OLD } });
+      const { text, saved } = await set({ ...REGISTRY_ONLY, slug: NAME });
+      // The tier's defaults, not the old override's network:all and write path.
+      expect(saved).toMatchObject({
+        slug: SLUG,
+        network: { mode: "allowlist", allow: ["registry.npmjs.org"] },
+        filesystem: { read: [], write: [] },
+      });
+      expect(clearOverride).toHaveBeenCalledWith(NAME);
+      expect(text).toContain("This override replaces it, and didn't start from it");
+      expect(text).toContain('"write":["/home/u"]');
+    });
+
+    it("isn't touched by a set whose name doesn't resolve", async () => {
+      const GONE = "io.github.gone/srv";
+      const { call, clearOverride, saveOverride } = setup({ getServer: byName, filed: { [GONE]: OLD } });
+      const res = await call({ ...REGISTRY_ONLY, slug: GONE });
+      expect(res.isError).toBe(true);
+      expect(saveOverride).not.toHaveBeenCalled();
+      expect(clearOverride).not.toHaveBeenCalled();
+    });
+
+    it("is listed by any view, so it can be found without remembering the name", async () => {
+      const filed = { "io.github.a/one": OLD, "io.github.b/two": OLD };
+      const text = await setup({ filed }).view("srv");
+      expect(text).toContain("The overrides file also has 2 overrides saved under a registry name");
+      expect(text).toContain("`io.github.a/one`, `io.github.b/two`");
+      expect(await setup({}).view("srv")).not.toContain("saved under a registry name");
+    });
   });
 });
