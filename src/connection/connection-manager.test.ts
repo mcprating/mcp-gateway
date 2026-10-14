@@ -66,11 +66,11 @@ function manifest(network: CapabilityManifest["network"]): CapabilityManifest {
   };
 }
 
-function manager(m: CapabilityManifest) {
+function manager(m: CapabilityManifest, registryClient: object = {}) {
   const audit: Array<{ type: string; reason?: string }> = [];
   const cm = new ConnectionManager(
     mcpServer as never,
-    {} as never,
+    registryClient as never,
     { isToolAllowed: () => true } as never,
     config,
   );
@@ -114,6 +114,35 @@ describe("env passed to mcp_connect", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("trust", () => {
+  it("keeps the registry record a connect by slug used, for mcp_sandbox set to build defaults on", async () => {
+    const record = {
+      slug: "srv",
+      name: "Srv",
+      qualityScore: 45,
+      authDetails: { envVars: [{ name: "GITHUB_TOKEN" }], allEnvVars: [], schemes: [] },
+    };
+    resolveBakedImage.mockResolvedValue({ image: "mcp-sandbox/srv:latest", bin: "srv" });
+    const { cm } = manager(manifest({ mode: "none", allow: [] }), {
+      getServer: async () => record,
+      resolveInstallCommand: () => ({ command: "npx", args: ["-y", "srv"] }),
+    });
+    await cm.connect({ slug: "srv", confirmed: true });
+
+    expect(cm.getConnection("srv")).toMatchObject({ trustTier: "community", registryServer: record });
+    await cm.disconnect("srv", { removeProfile: false });
+  });
+
+  it("keeps none for a connect by command", async () => {
+    resolveBakedImage.mockResolvedValue({ image: "mcp-sandbox/npx-some-server:latest", bin: "some-server" });
+    const { cm } = manager(manifest({ mode: "none", allow: [] }));
+    await cm.connect({ command: "npx", args: ["-y", "some-server"], confirmed: true });
+
+    expect(cm.getConnection("npx-some-server")).toMatchObject({ trustTier: "unknown", registryServer: null });
+    await cm.disconnect("npx-some-server", { removeProfile: false });
   });
 });
 

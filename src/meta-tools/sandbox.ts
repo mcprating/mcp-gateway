@@ -108,13 +108,17 @@ export function registerSandbox(
         }
 
         // ── SET ────────────────────────────────────────────────────────────
-        // Change only the fields given, on top of the saved override, else the
-        // live connection's manifest, else what a connect would resolve. Only
-        // that last one needs the trust tier, and so the registry.
+        // Change only the fields given, on top of the saved override, else what
+        // the next connect would resolve: the defaults for the server's trust
+        // tier. A live connection says which tier and registry record those
+        // come from; without one, ask the registry.
         const saved = resolver.getOverride(slug);
         const conn = connectionManager.getConnection(slug);
-        const live = conn?.manifest && { running: conn.manifest, resolved: conn.resolvedManifest };
-        const lookup = saved || live ? undefined : await lookUpTrust(registryClient, slug);
+        const lookup: TrustLookup | undefined = saved
+          ? undefined
+          : conn
+            ? { status: "connection", trustTier: conn.trustTier, server: conn.registryServer }
+            : await lookUpTrust(registryClient, slug);
         const { manifest: updated, start } = overrideForSet(
           slug,
           {
@@ -126,14 +130,19 @@ export function registerSandbox(
             fsWrite: params.fsWrite,
             subprocess: params.subprocess,
           },
-          { saved, live, lookup },
+          { saved, lookup },
           resolver.containerIsolation,
         );
 
         resolver.saveOverride(updated);
 
+        // The live connection keeps what it runs under until a reconnect.
+        const fellBack =
+          conn?.manifest && conn.resolvedManifest
+            ? ` The live connection runs as \`${conn.manifest.enforcement}\`: no container engine (Docker or Podman) was found when it connected.`
+            : "";
         return text(
-          `## 🛡️ Sandbox override saved for \`${slug}\`\n\n${describeStart(slug, start)}\n\n${renderManifest(slug, updated)}\n\n_Takes effect on the next connection. Reconnect to apply._`,
+          `## 🛡️ Sandbox override saved for \`${slug}\`\n\n${describeStart(slug, start)}${fellBack}\n\n${renderManifest(slug, updated)}\n\n_Takes effect on the next connection. Reconnect to apply._`,
         );
       } catch (err) {
         return toolError(err instanceof Error ? err.message : String(err));
@@ -158,15 +167,11 @@ function describeStart(slug: string, start: OverrideStart): string {
   switch (start.from) {
     case "override":
       return "Changed the saved override; fields you didn't pass kept their saved values.";
-    case "connection":
-      if (start.fellBack) {
-        const { resolved, running } = start.fellBack;
-        return `Started from the manifest this connection resolved, with enforcement \`${resolved}\`, not the \`${running}\` it runs as: no container engine (Docker or Podman) was found when it connected. Fields you didn't pass kept the resolved values.`;
-      }
-      return "Started from the live connection's manifest; fields you didn't pass kept its values.";
     case "defaults": {
       const tier = `\`${start.trustTier}\``;
       switch (start.lookup) {
+        case "connection":
+          return `No saved override, so this started from what the next connect would use: the defaults for this connection's trust tier, ${tier}, with any env vars its registry record declares. Env names passed to mcp_connect aren't saved, since each connect allows its own. Fields you didn't pass kept those values.`;
         case "found":
           return `No saved override and not connected, so this started from what a connect would use: the ${tier} trust tier's defaults and the env vars the server's registry record declares. Fields you didn't pass kept those values.`;
         case "not-found":

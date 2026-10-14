@@ -330,6 +330,7 @@ export class ConnectionManager {
       registeredPromptProxies: new Map(),
       connectedAt: new Date(),
       trustTier,
+      registryServer,
       originalParams: { ...params, slug: params.slug || slug },
       reconnectAttempts: 0,
       failedPings: 0,
@@ -403,7 +404,7 @@ export class ConnectionManager {
           });
         } else {
           // No engine — downgrade to L1 and record it on the manifest, keeping
-          // the one resolved for mcp_sandbox "set" to build on.
+          // the one resolved so the user can be told why it isn't contained.
           connection.resolvedManifest = manifest;
           manifest = { ...manifest, enforcement: "l1-process" };
           log.warn("Container isolation requested but no engine available; using L1", { slug });

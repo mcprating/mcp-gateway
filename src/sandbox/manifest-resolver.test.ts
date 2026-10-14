@@ -180,16 +180,12 @@ describe("overrideForSet", () => {
     }
   });
 
-  it("changes a saved override in place, ahead of a live connection and the registry", () => {
+  it("changes a saved override in place, ahead of a live connection's tier and the registry", () => {
     const saved = manifest();
     const { manifest: m, start } = overrideForSet(
       "srv",
       REGISTRY_ONLY,
-      {
-        saved,
-        live: { running: manifest({ enforcement: "l1-process", env: { allow: [], inheritDefaults: true } }) },
-        lookup: { status: "found", server: GITHUB, trustTier: "verified" },
-      },
+      { saved, lookup: { status: "connection", trustTier: "verified", server: GITHUB } },
       false,
     );
     expect(start).toEqual({ from: "override" });
@@ -197,38 +193,45 @@ describe("overrideForSet", () => {
     expect(saved.network.mode).toBe("none");
   });
 
-  it("starts from the live connection's manifest when nothing is saved", () => {
-    const running = manifest({ env: { allow: ["PASSED_AT_CONNECT"], inheritDefaults: true } });
-    const { manifest: m, start } = overrideForSet("srv", REGISTRY_ONLY, { live: { running } }, false);
-    expect(start).toEqual({ from: "connection" });
-    expect(m.enforcement).toBe("l2-container");
-    expect(m.env.allow).toEqual(["PASSED_AT_CONNECT"]);
-    expect(m.limits).toEqual({ maxMemoryMb: 256 });
-  });
-
-  it("builds on the container a connection resolved, not the l1-process it fell back to with no engine", () => {
-    // What connect records with no Docker or Podman: the resolved manifest, and
-    // a copy at l1-process that the connection actually runs under.
-    const resolved = manifest();
-    const running = { ...resolved, enforcement: "l1-process" as const };
-    const { manifest: m, start } = overrideForSet("srv", REGISTRY_ONLY, { live: { running, resolved } }, true);
-    expect(m).toEqual({ ...resolved, network: { mode: "allowlist", allow: ["registry.npmjs.org"] } });
-    expect(start).toEqual({
-      from: "connection",
-      fellBack: { resolved: "l2-container", running: "l1-process" },
-    });
-  });
-
-  it("still saves l1-process for a fallen-back connection when that is asked for", () => {
-    const resolved = manifest();
-    const running = { ...resolved, enforcement: "l1-process" as const };
-    const { manifest: m } = overrideForSet(
-      "srv",
-      { enforcement: "l1-process" },
-      { live: { running, resolved } },
+  /**
+   * A live connection's own manifest is no base for an override: it allows
+   * the env names passed to that connect (which every later connect would
+   * then allow too, from the gateway's environment), it may run at L1 for want
+   * of an engine, and it may come from an override since reset. So set takes
+   * only the connection's tier and registry record, and builds the defaults.
+   */
+  it("builds a live connection's override on its tier's defaults and declared env vars", () => {
+    const { manifest: m, start } = overrideForSet(
+      "github",
+      REGISTRY_ONLY,
+      { lookup: { status: "connection", trustTier: "community", server: GITHUB } },
       true,
     );
-    expect(m.enforcement).toBe("l1-process");
+    expect(m).toEqual({
+      ...tierDefaults("github", "community", { containerIsolation: true, registryServer: GITHUB }),
+      network: { mode: "allowlist", allow: ["registry.npmjs.org"] },
+    });
+    expect(m.env.allow).toEqual(["GITHUB_TOKEN"]);
+    expect(start).toEqual({ from: "defaults", trustTier: "community", lookup: "connection" });
+  });
+
+  it("takes the tier a connection was given, as a command connect's unknown with no record", () => {
+    const { manifest: m } = overrideForSet(
+      "npx-srv",
+      {},
+      { lookup: { status: "connection", trustTier: "unknown", server: null } },
+      true,
+    );
+    expect(m).toEqual(tierDefaults("npx-srv", "unknown", { containerIsolation: true }));
+  });
+
+  it("keeps the container for a server whose connection fell back to L1, since its defaults ask for one", () => {
+    const lookup = { status: "connection", trustTier: "unknown", server: null } as const;
+    expect(overrideForSet("srv", REGISTRY_ONLY, { lookup }, true).manifest.enforcement).toBe("l2-container");
+    // An explicit l1-process is still saved as asked.
+    expect(
+      overrideForSet("srv", { enforcement: "l1-process" }, { lookup }, true).manifest.enforcement,
+    ).toBe("l1-process");
   });
 
   it("applies every field it is given, an empty list included", () => {

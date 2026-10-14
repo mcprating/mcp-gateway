@@ -1,6 +1,6 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type { TrustTier } from "../registry/types.js";
+import type { RegistryServer, TrustTier } from "../registry/types.js";
 import type { CapabilityManifest } from "../sandbox/types.js";
 import type { EgressProxy } from "../sandbox/egress-proxy.js";
 
@@ -80,6 +80,13 @@ export interface DownstreamConnection {
   connectedAt: Date;
   lastError?: string;
   trustTier: TrustTier;
+  /**
+   * The registry record the connect looked the server up by, or null for one
+   * connected by command or bare URL. With trustTier, it gives the defaults
+   * the server gets without an override (tierDefaults), which mcp_sandbox
+   * "set" builds on.
+   */
+  registryServer: RegistryServer | null;
   serverInfo?: { name: string; version: string };
 
   /** Sandbox capability manifest (L1+) this connection runs under: what is enforced */
@@ -87,9 +94,8 @@ export interface DownstreamConnection {
   /**
    * The manifest the connect resolved, when it couldn't run it: l2-container
    * with no Docker or Podman to start one, so `manifest` records the
-   * l1-process it fell back to. mcp_sandbox "set" builds on this one, or an
-   * override saved meanwhile would keep the server on the host after the
-   * engine came back.
+   * l1-process it fell back to. mcp_sandbox view and the connect summary say
+   * so, and tell the user to start an engine rather than to turn on isolation.
    */
   resolvedManifest?: CapabilityManifest;
 
