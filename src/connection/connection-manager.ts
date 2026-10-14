@@ -279,9 +279,16 @@ export class ConnectionManager {
       : [];
     const needTrustConfirm = policy.requiresConfirmation && !params.confirmed;
     const needEnvWarn = missingEnv.length > 0 && !params.confirmed;
-    if (needTrustConfirm || needEnvWarn) {
-      log.info("Connection requires confirmation", { slug, trustTier, missingEnv });
-      const parts: string[] = [];
+    // MCP Rating delisted this package, or knows this registry name as another
+    // package: say so before anything starts, whatever the trust tier.
+    const ratingWarnings = [
+      registryServer?.delistedReason ? `⛔ ${registryServer.rating?.by ?? "MCP Rating"}: ${registryServer.delistedReason}` : "",
+      registryServer?.trustWarning ? `⚠️ ${registryServer.trustWarning}` : "",
+    ].filter(Boolean);
+    const needRatingWarn = ratingWarnings.length > 0 && !params.confirmed;
+    if (needTrustConfirm || needEnvWarn || needRatingWarn) {
+      log.info("Connection requires confirmation", { slug, trustTier, missingEnv, ratingWarnings });
+      const parts: string[] = [...(needRatingWarn ? ratingWarnings : [])];
       if (needTrustConfirm) {
         parts.push(`⚠️ **${displayName}** has trust tier [${trustTier}]. ${policy.description}`);
       }

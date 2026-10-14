@@ -291,9 +291,16 @@ MCP Rating's mirror of it.
   its registry name, `mcp_connect({slug: "io.github.owner/server"})`. That works
   in any later session too.
 - **Scores come from MCP Rating only.** Quality scores, safety flags and start
-  tests are MCP Rating's. A server from another registry shows as *unrated* and
-  [Unverified], so connecting it asks for confirmation. Numbers another registry
-  puts in its own entries (`_meta`) are not read: anyone can write them.
+  tests are MCP Rating's. When MCP Rating is one of your registries, a server
+  found in another one gets MCP Rating's record of the **same package** — the
+  same npm or PyPI package, Docker image or hosted endpoint — in one request per
+  search. It is matched by package, never by name: any registry can give any
+  package a well-known name. Otherwise the server shows as *unrated* and
+  [Unverified], so connecting it asks for confirmation. Numbers another
+  registry puts in its own entries (`_meta`) are not read: anyone can write them.
+- **Warnings that stop a connect.** If MCP Rating knows a server's registry name
+  as a different package, or has delisted the package, `mcp_discover` says so,
+  lists it last, and `mcp_connect` asks for confirmation whatever its trust tier.
 - **The partner key goes to MCP Rating only**, never to another registry.
 
 The official registry's search matches server names only and was slow when this

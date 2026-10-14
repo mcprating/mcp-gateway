@@ -1,6 +1,24 @@
 import type { RegistryListResponse, RegistryServer } from "../types.js";
 import { HttpRegistrySource, labelFor, type RegistrySource, type SearchOptions } from "./http-source.js";
 
+/** MCP Rating's answer for one package key (GET /servers/lookup). */
+export interface LookupRecord {
+  slug: string;
+  name: string;
+  url: string;
+  qualityScore: number;
+  safetyScore: number | null;
+  safetyFlags: string[];
+  isOfficial: boolean;
+  isVerified: boolean;
+  stars: number;
+  weeklyDownloads: number;
+  delistedReason: string | null;
+  verification: RegistryServer["verification"];
+  /** Every key that server answers to. */
+  keys: string[];
+}
+
 /**
  * The MCP Rating API (`…/api/v1`): search with quality, safety and start-test
  * data, and servers by slug. The partner key, when set, goes to this registry
@@ -39,6 +57,21 @@ export class McpRatingSource extends HttpRegistrySource implements RegistrySourc
     );
     if (server) server.source = this.label;
     return server;
+  }
+
+  /**
+   * MCP Rating's record for each package key, in one request (at most 25 keys).
+   * An MCP Rating too old to have the endpoint answers 404: no records.
+   */
+  async lookup(keys: string[]): Promise<Map<string, LookupRecord | null>> {
+    if (keys.length === 0) return new Map();
+    const params = new URLSearchParams();
+    for (const k of keys.slice(0, 25)) params.append("key", k);
+    const res = await this.getJson<{ data?: Array<{ key: string; server: LookupRecord | null }> }>(
+      `${this.baseUrl}/servers/lookup?${params}`,
+      "MCP Rating lookup",
+    );
+    return new Map((res?.data ?? []).map((d) => [d.key, d.server]));
   }
 
   /**

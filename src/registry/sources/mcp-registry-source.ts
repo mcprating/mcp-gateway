@@ -98,6 +98,10 @@ export function fromServerJson(entry: ServerEntry, source: string): RegistryServ
     metadata: {
       registryName: s.name,
       version: s.version ?? null,
+      // Every package it declares, launchable or not: what MCP Rating is asked about.
+      packages: pkgs
+        .filter((p) => p && typeof p.identifier === "string")
+        .map((p) => ({ registryType: p.registryType, identifier: p.identifier })),
       remotes,
       authEnvVars: needed,
       requiresAuth: needed.length > 0 || remoteHeaders.length > 0,

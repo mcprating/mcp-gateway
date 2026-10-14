@@ -46,11 +46,13 @@ export function registerDiscover(
         // Verified-and-ready first, then ready but untested, then needs setup,
         // then seen failing in our test, then can't start at all.
         const order = { ready: 0, "needs-setup": 2, "failed-in-test": 3, "not-runnable": 4 } as const;
-        const rank = (r: ReturnType<RegistryClient["readiness"]>) =>
-          r.level === "ready" && !r.verified ? 1 : order[r.level];
+        // Last of all: a package MCP Rating has delisted, or a registry name
+        // MCP Rating knows as a different package.
+        const rank = (s: (typeof result.data)[number], r: ReturnType<RegistryClient["readiness"]>) =>
+          s.delistedReason || s.trustWarning ? 5 : r.level === "ready" && !r.verified ? 1 : order[r.level];
         const ranked = result.data
           .map((server, i) => ({ server, i, ready: registryClient.readiness(server) }))
-          .sort((a, b) => rank(a.ready) - rank(b.ready) || a.i - b.i)
+          .sort((a, b) => rank(a.server, a.ready) - rank(b.server, b.ready) || a.i - b.i)
           .slice(0, want);
 
         const lines: string[] = [
@@ -110,11 +112,13 @@ export function registerDiscover(
 
           lines.push(
             `### ${server.name}`,
-            `**Slug:** \`${server.slug}\` · **Score:** ${score} · **Trust:** [${tierLabel}]` +
+            `**Slug:** \`${server.slug}\` · **Score:** ${score}${server.rating ? ` (rated by ${server.rating.by})` : ""} · **Trust:** [${tierLabel}]` +
               (manyRegistries && server.source ? ` · **Registry:** ${server.source}` : ""),
             server.description || "_No description_",
             stats ? `📊 ${stats}` : "",
           );
+          if (server.delistedReason) lines.push(`⛔ ${server.rating?.by ?? "MCP Rating"}: ${server.delistedReason}`);
+          if (server.trustWarning) lines.push(`⚠️ ${server.trustWarning}`);
 
           // How it runs, and whether the gateway can start it right now.
           if (ready.via === "install") {

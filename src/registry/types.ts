@@ -52,6 +52,15 @@ export interface RegistryServer {
   /** The server's official registry name (`io.github.owner/server`), when it has one. */
   registryName?: string | null;
   /**
+   * For a server from another registry: MCP Rating's record of the same
+   * package, whose score, safety and start test this row now carries.
+   */
+  rating?: { by: string; slug: string; url: string };
+  /** MCP Rating doesn't list this package, and why (its delisting reason). */
+  delistedReason?: string | null;
+  /** The registry name points somewhere MCP Rating knows as a different package. */
+  trustWarning?: string;
+  /**
    * What mcp_connect takes to find this server again, in any session: its slug,
    * or — for a registry that keys servers by name — its registry name. Unset
    * means the slug.

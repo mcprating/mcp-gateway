@@ -9,7 +9,8 @@ import type {
   TrustTier,
 } from "./types.js";
 import type { RegistrySource, RegistryStatus, SearchOptions } from "./sources/http-source.js";
-import { McpRatingSource } from "./sources/mcprating-source.js";
+import { McpRatingSource, type LookupRecord } from "./sources/mcprating-source.js";
+import { lookupKeys } from "./package-keys.js";
 import { McpRegistrySource } from "./sources/mcp-registry-source.js";
 
 export type { RegistryStatus } from "./sources/http-source.js";
@@ -94,6 +95,8 @@ export class RegistryClient {
    * its cache, so the same search again is quick.
    */
   searchDeadlineMs = 15_000;
+  /** How long MCP Rating gets to rate other registries' servers before they're shown unrated. */
+  ratingDeadlineMs = 5_000;
 
   /** A list of sources, or (as before) one MCP Rating API URL. */
   constructor(sources: RegistrySource[] | string, cacheTtlMs = 300_000, partnerKey?: string) {
@@ -155,6 +158,7 @@ export class RegistryClient {
         data.push(s);
       }
     }
+    await this.rate(data);
     return {
       data,
       total: answered.reduce((n, r) => n + (r.total ?? r.data.length), 0),
@@ -177,7 +181,10 @@ export class RegistryClient {
       try {
         const hit = byName ? await s.getByName(ref) : await s.getServer(ref);
         answered = true;
-        if (hit) return hit;
+        if (hit) {
+          if (s.kind !== "mcprating") await this.rate([hit]);
+          return hit;
+        }
       } catch (err) {
         lastError = err;
         log.warn("Registry lookup failed", { registry: s.label, ref, error: String(err) });
@@ -187,6 +194,68 @@ export class RegistryClient {
       throw new RegistryError(`No registry answered for "${ref}": ${String((lastError as Error)?.message ?? lastError)}`);
     }
     return null;
+  }
+
+  /**
+   * Give servers from other registries MCP Rating's record of the same
+   * package — score, safety flags, start test — in one request for the page.
+   * Only when MCP Rating is one of the configured registries: nothing is sent
+   * to it otherwise.
+   *
+   * By package, never by name: any registry can give any package a well-known
+   * name, and a name match would hand that package someone else's score. The
+   * name is used the other way round — when MCP Rating knows the name as a
+   * different package, the row says so. A package MCP Rating has delisted
+   * stays unrated, with the reason.
+   *
+   * Best effort: if MCP Rating is slow or down, the rows stay unrated.
+   */
+  async rate(rows: RegistryServer[]): Promise<void> {
+    const rater = this.sources.find((s): s is McpRatingSource => s instanceof McpRatingSource);
+    if (!rater) return;
+    const unrated = rows
+      .filter((r) => r.source !== rater.label && (r.qualityScore === null || r.qualityScore === undefined))
+      .slice(0, 12)
+      .map((r) => ({ r, k: lookupKeys(r) }));
+    if (unrated.length === 0) return;
+    // Package keys first — they decide scores; names only flag a mismatch.
+    const keys = [
+      ...new Set([...unrated.flatMap(({ k }) => k.packages), ...unrated.flatMap(({ k }) => (k.name ? [k.name] : []))]),
+    ].slice(0, 25);
+    if (keys.length === 0) return;
+
+    let records: Map<string, LookupRecord | null>;
+    try {
+      records = await withDeadline(rater.lookup(keys), this.ratingDeadlineMs);
+    } catch (err) {
+      log.warn("MCP Rating lookup failed; servers from other registries stay unrated", { error: String(err) });
+      return;
+    }
+
+    for (const { r, k } of unrated) {
+      const rec = k.packages.map((key) => records.get(key)).find((x): x is LookupRecord => !!x);
+      if (rec) {
+        r.rating = { by: rater.label, slug: rec.slug, url: rec.url };
+        if (rec.delistedReason) {
+          r.delistedReason = rec.delistedReason;
+        } else {
+          r.qualityScore = rec.qualityScore;
+          r.safetyScore = rec.safetyScore;
+          r.safetyFlags = rec.safetyFlags;
+          r.isOfficial = rec.isOfficial;
+          r.isVerified = rec.isVerified;
+          r.verification = rec.verification;
+          r.stars = rec.stars;
+          r.weeklyDownloads = rec.weeklyDownloads;
+        }
+      }
+      const named = k.name ? records.get(k.name) : null;
+      if (named && k.packages.length > 0 && !k.packages.some((p) => named.keys.includes(p))) {
+        const theirs = named.keys.filter((x) => !x.startsWith("name:")).join(", ") || "a different package";
+        r.trustWarning =
+          `MCP Rating knows ${r.registryName} as ${theirs}; this registry's entry of that name runs ${k.packages.join(", ")}.`;
+      }
+    }
   }
 
   /**

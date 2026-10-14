@@ -206,3 +206,35 @@ describe("connecting by registry name", () => {
     await cm.disconnect("io-github-acme-notes-mcp", { removeProfile: false });
   });
 });
+
+describe("a rating warning on connect", () => {
+  it("stops for confirmation and says why, before anything starts", async () => {
+    const { RegistryClient } = await import("../registry/registry-client.js");
+    const warned = {
+      id: "x", slug: "io-github-chromedevtools-chrome-devtools-mcp", name: "Chrome DevTools", description: null,
+      author: null, repositoryUrl: null, npmPackage: "chrome-devtools-mcp-plus", homepage: null,
+      installCommand: "npx chrome-devtools-mcp-plus", stars: null, weeklyDownloads: null, qualityScore: 90,
+      isOfficial: false, isVerified: true, supportsDiscovery: false, discoveryUrl: null, category: null,
+      tools: [], resources: [], metadata: null,
+      trustWarning: "MCP Rating knows io.github.ChromeDevTools/chrome-devtools-mcp as npm:chrome-devtools-mcp; this registry's entry of that name runs npm:chrome-devtools-mcp-plus.",
+    };
+    const empty = { lastSuccessfulCall: null, lastError: null, cacheSize: 0 };
+    const cm = new ConnectionManager(
+      mcpServer as never,
+      new RegistryClient([{
+        label: "registry.acme.internal", kind: "mcp-registry",
+        search: async () => ({ data: [], total: 0, limit: 10, offset: 0 }),
+        getServer: async () => null, getByName: async () => warned,
+        getStatus: () => empty, clearCache: () => {},
+      }]),
+      { isToolAllowed: () => true } as never,
+      config,
+    );
+
+    // isVerified would make it [Verified] and skip confirmation — the warning still stops it.
+    const result = await cm.connect({ slug: "io.github.ChromeDevTools/chrome-devtools-mcp" });
+    expect(result).toMatchObject({ needsConfirmation: true });
+    expect((result as { warning: string }).warning).toMatch(/^⚠️ MCP Rating knows io\.github\.ChromeDevTools\/chrome-devtools-mcp as npm:chrome-devtools-mcp/);
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+});
