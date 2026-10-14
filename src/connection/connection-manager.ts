@@ -36,6 +36,7 @@ import type {
   ConnectionSummary,
   ConnectResult,
   ConfirmationRequired,
+  ConnectTrust,
   DownstreamTool,
   DownstreamResource,
   DownstreamPrompt,
@@ -70,6 +71,8 @@ export class ConnectionManager {
   private resyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Active reconnect timers per slug */
   private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** The trust each slug's latest connect attempt worked out (lastTrust). */
+  private attemptedTrust = new Map<string, ConnectTrust>();
   /** Health check interval handle */
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
   /** Gateway start time for uptime calculation */
@@ -274,6 +277,10 @@ export class ConnectionManager {
       ? this.registryClient.factsFor(registryServer)
       : await this.registryClient.factsForLaunch({ command, args, url });
     trustTier = facts.tier;
+    // Kept whatever happens next (refused, failed, waiting on a confirmation):
+    // mcp_sandbox "set" builds on this tier's defaults, and a slug made from a
+    // command can't be turned back into the package to look it up again.
+    this.attemptedTrust.set(slug, { trustTier, registryServer });
 
     // The user's minimum-score rule. Not something confirmed: true can lift —
     // the agent sets that flag itself — only the gateway's configuration can.
@@ -716,6 +723,15 @@ export class ConnectionManager {
 
   getConnection(slug: string): DownstreamConnection | undefined {
     return this.connections.get(slug);
+  }
+
+  /**
+   * The trust tier and registry record the latest connect for this slug
+   * worked out since the gateway started, even one that was refused or
+   * failed; undefined if none got that far.
+   */
+  lastTrust(slug: string): ConnectTrust | undefined {
+    return this.attemptedTrust.get(slug);
   }
 
   listConnections(): ConnectionSummary[] {

@@ -133,15 +133,19 @@ export function registerSandbox(
         // Change only the fields given, on top of the saved override, else what
         // the next connect would resolve: the defaults for the server's trust
         // tier. A live connection says which tier and registry record those
-        // come from; without one, ask the registry: by name if that is what was
-        // passed, since another registry's server can't be found by its slug.
+        // come from, and so does the latest connect attempt without one. Only
+        // then ask the registry: by name if that is what was passed, since
+        // another registry's server can't be found by its slug.
         const saved = resolver.getOverride(slug);
         const conn = connectionManager.getConnection(slug);
+        const attempt = conn ? undefined : connectionManager.lastTrust(slug);
         const lookup: TrustLookup | undefined = saved
           ? undefined
           : conn
             ? { status: "connection", trustTier: conn.trustTier, server: conn.registryServer }
-            : (byName ?? (await lookUpTrust(registryClient, slug)));
+            : attempt
+              ? { status: "last-connect", trustTier: attempt.trustTier, server: attempt.registryServer }
+              : (byName ?? (await lookUpTrust(registryClient, slug)));
         const { manifest: updated, start } = overrideForSet(
           slug,
           {
@@ -195,10 +199,12 @@ function describeStart(slug: string, start: OverrideStart): string {
       switch (start.lookup) {
         case "connection":
           return `No saved override, so this started from what the next connect would use: the defaults for this connection's trust tier, ${tier}, with any env vars its registry record declares. Env names passed to mcp_connect aren't saved, since each connect allows its own. Fields you didn't pass kept those values.`;
+        case "last-connect":
+          return `No saved override and not connected, so this started from what the next connect would use: the defaults for the trust tier its last connect attempt worked out, ${tier}, with any env vars its registry record declares. Env names passed to mcp_connect aren't saved, since each connect allows its own. Fields you didn't pass kept those values.`;
         case "found":
           return `No saved override and not connected, so this started from what a connect would use: the ${tier} trust tier's defaults and the env vars the server's registry record declares. Fields you didn't pass kept those values.`;
         case "not-found":
-          return `No saved override and not connected, and \`${slug}\` isn't a registry slug, so this started from the ${tier} trust tier's defaults, which a connect by command or URL also gets. Fields you didn't pass kept those values.`;
+          return `No saved override, not connected, and no connect tried since the gateway started, and \`${slug}\` isn't a registry slug, so this started from the ${tier} trust tier's defaults, the most locked down. A slug like this usually comes from a command, and a connect by command takes its tier from what MCP Rating knows of the package it runs, which this slug doesn't say. If MCP Rating knows the package, this override is stricter than the connect's defaults: \`reset\`, try mcp_connect once (even a refused or failed attempt records the tier), then set again. Fields you didn't pass kept those values.`;
         case "unreachable":
           return `No saved override and not connected, and the MCP-Rating registry couldn't be reached to look up \`${slug}\`, so this started from the ${tier} trust tier's defaults, the most locked down. If the server declares env vars it needs (an API key), they aren't in this override: pass them in \`envAllow\`, or \`reset\` and set again once the registry answers.`;
       }
