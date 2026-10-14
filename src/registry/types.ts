@@ -60,6 +60,8 @@ export interface RegistryServer {
   delistedReason?: string | null;
   /** The registry name points somewhere MCP Rating knows as a different package. */
   trustWarning?: string;
+  /** For a rated server from another registry: MCP Rating's upkeep facts for the package. */
+  maintenance?: import("./trust-facts.js").Maintenance;
   /**
    * What mcp_connect takes to find this server again, in any session: its slug,
    * or — for a registry that keys servers by name — its registry name. Unset

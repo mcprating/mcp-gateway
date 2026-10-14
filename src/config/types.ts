@@ -15,6 +15,14 @@ export interface GatewayConfig {
    */
   registries?: RegistryConfig[];
 
+  /**
+   * Refuse to connect anything MCP Rating scores below this (0–100), or hasn't
+   * scored at all — whichever way it is connected: slug, registry name, command
+   * or URL. Unset means no such rule. confirmed: true doesn't lift it; only
+   * this setting does. Needs MCP Rating among the registries.
+   */
+  minQualityScore?: number;
+
   /** Timeout for proxied tool calls in milliseconds */
   proxyTimeoutMs: number;
 

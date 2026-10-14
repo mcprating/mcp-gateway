@@ -6,6 +6,12 @@ import { namespaceTool } from "../proxy/tool-router.js";
 import { TRUST_LABELS } from "../permissions/trust-tiers.js";
 import { ManifestResolver } from "../sandbox/manifest-resolver.js";
 import { toolError } from "../utils/errors.js";
+import { trustLines, type TrustFacts } from "../registry/trust-facts.js";
+
+/** trustLines as a markdown list; safety flags (already "- …") nest under their line. */
+export function trustBullets(facts: TrustFacts): string[] {
+  return trustLines(facts).map((l) => (l.startsWith("- ") ? `  ${l}` : `- ${l}`));
+}
 
 export function registerConnect(
   server: McpServer,
@@ -99,6 +105,8 @@ export function registerConnect(
             ? `**Server:** ${summary.serverInfo.name} v${summary.serverInfo.version}`
             : "",
           "",
+          // Before the tools: what MCP Rating knew about what just started.
+          ...(summary.trust ? ["### What MCP Rating knows", ...trustBullets(summary.trust), ""] : []),
           "### Available Tools",
           ...namespacedTools.map((t) => `- \`${t}\``),
         ];

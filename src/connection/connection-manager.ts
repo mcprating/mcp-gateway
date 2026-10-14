@@ -48,6 +48,7 @@ import {
   PermissionDeniedError,
 } from "../utils/errors.js";
 import { getTrustPolicy } from "../permissions/trust-tiers.js";
+import { trustLines, type TrustFacts } from "../registry/trust-facts.js";
 import { log } from "../utils/logger.js";
 import { loadProfiles, addProfile, removeProfile } from "../config/profiles.js";
 import { ensureInstalled } from "./auto-installer.js";
@@ -266,6 +267,35 @@ export class ConnectionManager {
       if (inject.length > 0) args = ["run", ...inject, ...rest];
     }
 
+    // What MCP Rating knows, before anything starts: from the registry row, or
+    // — for an explicit command or URL — from the package it would run, so a
+    // known package started by command is judged as itself, not "unknown".
+    const facts: TrustFacts = registryServer
+      ? this.registryClient.factsFor(registryServer)
+      : await this.registryClient.factsForLaunch({ command, args, url });
+    trustTier = facts.tier;
+
+    // The user's minimum-score rule. Not something confirmed: true can lift —
+    // the agent sets that flag itself — only the gateway's configuration can.
+    const min = this.config.minQualityScore;
+    if (min !== undefined) {
+      if (!this.registryClient.ratesPackages) {
+        throw new PermissionDeniedError(
+          slug,
+          `Your minimum score rule (at least ${min}/100) needs MCP Rating among the registries to check against, and it isn't one: nothing can be connected until it is, or the rule is removed.`,
+        );
+      }
+      const score = facts.delistedReason ? null : facts.qualityScore;
+      if (score === null || score < min) {
+        throw new PermissionDeniedError(
+          slug,
+          `Refused by your minimum score rule (at least ${min}/100): "${displayName}" ${
+            score === null ? "has no MCP Rating score" : `scores ${score}/100`
+          }. Only the gateway's configuration changes this rule; confirming doesn't.`,
+        );
+      }
+    }
+
     // Check trust policy — require confirmation for community/unknown tier
     const policy = getTrustPolicy(trustTier);
     if (!policy.allowByDefault) {
@@ -279,16 +309,17 @@ export class ConnectionManager {
       : [];
     const needTrustConfirm = policy.requiresConfirmation && !params.confirmed;
     const needEnvWarn = missingEnv.length > 0 && !params.confirmed;
-    // MCP Rating delisted this package, or knows this registry name as another
-    // package: say so before anything starts, whatever the trust tier.
-    const ratingWarnings = [
-      registryServer?.delistedReason ? `⛔ ${registryServer.rating?.by ?? "MCP Rating"}: ${registryServer.delistedReason}` : "",
-      registryServer?.trustWarning ? `⚠️ ${registryServer.trustWarning}` : "",
-    ].filter(Boolean);
-    const needRatingWarn = ratingWarnings.length > 0 && !params.confirmed;
-    if (needTrustConfirm || needEnvWarn || needRatingWarn) {
-      log.info("Connection requires confirmation", { slug, trustTier, missingEnv, ratingWarnings });
-      const parts: string[] = [...(needRatingWarn ? ratingWarnings : [])];
+    // Whatever the trust tier: MCP Rating delisted this package, knows this
+    // registry name as another package, or puts its safety in the risk band.
+    const needRatingWarn = !!(facts.delistedReason || facts.trustWarning) && !params.confirmed;
+    const riskySafety = facts.safetyScore !== null && facts.safetyScore < 50;
+    const needSafetyWarn = riskySafety && !params.confirmed;
+    if (needTrustConfirm || needEnvWarn || needRatingWarn || needSafetyWarn) {
+      log.info("Connection requires confirmation", { slug, trustTier, missingEnv, facts: { by: facts.by, score: facts.qualityScore, safety: facts.safetyScore } });
+      const parts: string[] = [`**What MCP Rating knows about ${displayName}:**\n${trustLines(facts).join("\n")}`];
+      if (needSafetyWarn) {
+        parts.push(`⚠️ Its safety score is in the risk band (${facts.safetyScore}/100). Read the flags above before starting it.`);
+      }
       if (needTrustConfirm) {
         parts.push(`⚠️ **${displayName}** has trust tier [${trustTier}]. ${policy.description}`);
       }
@@ -343,6 +374,7 @@ export class ConnectionManager {
       registeredPromptProxies: new Map(),
       connectedAt: new Date(),
       trustTier,
+      trust: facts,
       originalParams: { ...params, slug: params.slug || slug },
       reconnectAttempts: 0,
       failedPings: 0,
@@ -1132,6 +1164,7 @@ export class ConnectionManager {
       promptCount: connection.prompts.size,
       connectedAt: connection.connectedAt,
       serverInfo: connection.serverInfo,
+      trust: connection.trust,
       reconnectAttempts: connection.reconnectAttempts || undefined,
       failedPings: connection.failedPings || undefined,
       lastPingAt: connection.lastPingAt,

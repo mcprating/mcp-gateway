@@ -60,6 +60,8 @@ export function loadConfig(): GatewayConfig {
       parseRegistryList(fileConfig.registries as Array<string | RegistryConfig> | undefined) ??
       undefined,
 
+    minQualityScore: parseMinScore(process.env.MCP_GATEWAY_MIN_SCORE ?? fileConfig.minQualityScore),
+
     proxyTimeoutMs: parseIntEnv("MCP_GATEWAY_TIMEOUT") ??
       fileConfig.proxyTimeoutMs ??
       DEFAULTS.proxyTimeoutMs,
@@ -194,6 +196,24 @@ function parseCsvEnv(name: string): string[] | undefined {
     .map((s) => s.trim())
     .filter(Boolean);
   return items.length > 0 ? items : undefined;
+}
+
+/**
+ * The minimum-score rule from MCP_GATEWAY_MIN_SCORE or `minQualityScore`.
+ * Unset is no rule. A value that isn't a whole number from 0 to 100 fails
+ * closed — read as 100, which refuses everything — rather than quietly
+ * meaning "no rule": a typo in a safety setting should be noticed.
+ */
+export function parseMinScore(v: unknown): number | undefined {
+  if (v === undefined || v === null || (typeof v === "string" && v.trim() === "")) return undefined;
+  const n = typeof v === "number" ? v : /^\s*\d+\s*$/.test(String(v)) ? Number(v) : Number.NaN;
+  if (!Number.isInteger(n) || n < 0 || n > 100) {
+    process.stderr.write(
+      `[mcp-gateway] minimum score "${String(v)}" isn't a whole number from 0 to 100; refusing every connect (treating it as 100) until it's fixed\n`,
+    );
+    return 100;
+  }
+  return n;
 }
 
 function parseIntEnv(name: string): number | undefined {
