@@ -55,6 +55,147 @@ const TIER_DEFAULTS: Record<
 };
 
 /**
+ * The manifest a server with no saved override gets: its trust tier's
+ * defaults, the auth env vars its registry record declares, and any env names
+ * the user passed at connect. Pure, so mcp_sandbox "set" can start from
+ * exactly what a connect would resolve.
+ */
+export function tierDefaults(
+  slug: string,
+  trustTier: TrustTier,
+  opts: {
+    /** Escalate community/unknown to l2-container (MCP_GATEWAY_CONTAINER_ISOLATION). */
+    containerIsolation: boolean;
+    registryServer?: RegistryServer | null;
+    /** Env var names the user explicitly supplied at connect time. */
+    userProvidedEnvKeys?: string[];
+  },
+): CapabilityManifest {
+  const tier = TIER_DEFAULTS[trustTier];
+
+  // Escalate untrusted tiers to container isolation when enabled.
+  const enforcement: EnforcementLevel =
+    opts.containerIsolation &&
+    (trustTier === "community" || trustTier === "unknown")
+      ? "l2-container"
+      : tier.enforcement;
+
+  // Build the env allowlist from the server's declared auth vars plus any
+  // vars the user explicitly passed (they clearly intend those to flow).
+  const declaredEnv = (opts.registryServer?.authDetails?.envVars ?? []).map(
+    (e) => e.name,
+  );
+  const allEnv = new Set<string>([...declaredEnv, ...(opts.userProvidedEnvKeys ?? [])]);
+
+  return {
+    version: 1,
+    slug,
+    enforcement,
+    env: {
+      allow: [...allEnv],
+      inheritDefaults: tier.inheritDefaults,
+    },
+    network: {
+      mode: tier.network,
+      allow: [],
+    },
+    filesystem: {
+      read: [],
+      write: [],
+    },
+    subprocess: tier.subprocess,
+  };
+}
+
+/** What the registry said when asked about a slug outside a connect. */
+export type TrustLookup =
+  | { status: "found"; server: RegistryServer; trustTier: TrustTier }
+  /** Not a registry slug: what connects by command or URL produce. */
+  | { status: "not-found" }
+  | { status: "unreachable" };
+
+/** The fields mcp_sandbox "set" changes. One left out keeps its current value. */
+export interface ManifestChanges {
+  enforcement?: EnforcementLevel;
+  network?: NetworkMode;
+  networkAllow?: string[];
+  envAllow?: string[];
+  fsRead?: string[];
+  fsWrite?: string[];
+  subprocess?: boolean;
+}
+
+/** What an override was built on, so mcp_sandbox can tell the user. */
+export type OverrideStart =
+  | { from: "override" }
+  | { from: "connection" }
+  | { from: "defaults"; trustTier: TrustTier; lookup: TrustLookup["status"] };
+
+/**
+ * The override mcp_sandbox "set" saves: `changes` applied to what the server
+ * would otherwise run with. That is its saved override, else the manifest its
+ * live connection resolved, else what a connect would resolve — the defaults
+ * for its trust tier. (A fixed l1-process baseline used to stand in for the
+ * last, so changing only the network also dropped the container and the
+ * server's declared env vars.)
+ *
+ * The tier comes from `lookup`, which the caller needs to make only when
+ * there is neither a saved override nor a live manifest. A slug the registry
+ * doesn't have gets "unknown", as a connect by command or URL does; so does
+ * one it couldn't be asked about, since the most locked-down tier is the only
+ * honest guess.
+ */
+export function overrideForSet(
+  slug: string,
+  changes: ManifestChanges,
+  current: {
+    saved?: CapabilityManifest;
+    live?: CapabilityManifest;
+    lookup?: TrustLookup;
+  },
+  containerIsolation: boolean,
+): { manifest: CapabilityManifest; start: OverrideStart } {
+  let base: CapabilityManifest;
+  let start: OverrideStart;
+  if (current.saved) {
+    base = current.saved;
+    start = { from: "override" };
+  } else if (current.live) {
+    base = current.live;
+    start = { from: "connection" };
+  } else {
+    const lookup: TrustLookup = current.lookup ?? { status: "unreachable" };
+    const found = lookup.status === "found" ? lookup : null;
+    const trustTier = found?.trustTier ?? "unknown";
+    base = tierDefaults(slug, trustTier, {
+      containerIsolation,
+      registryServer: found?.server,
+    });
+    start = { from: "defaults", trustTier, lookup: lookup.status };
+  }
+
+  const manifest: CapabilityManifest = {
+    ...base,
+    slug,
+    enforcement: changes.enforcement ?? base.enforcement,
+    env: {
+      allow: changes.envAllow ?? base.env.allow,
+      inheritDefaults: base.env.inheritDefaults,
+    },
+    network: {
+      mode: changes.network ?? base.network.mode,
+      allow: changes.networkAllow ?? base.network.allow,
+    },
+    filesystem: {
+      read: changes.fsRead ?? base.filesystem.read,
+      write: changes.fsWrite ?? base.filesystem.write,
+    },
+    subprocess: changes.subprocess ?? base.subprocess,
+  };
+  return { manifest, start };
+}
+
+/**
  * Resolves and persists per-server capability manifests.
  *
  * A manifest is derived from (in priority order):
@@ -68,7 +209,7 @@ export class ManifestResolver {
    * When true, untrusted tiers (community/unknown) default to l2-container
    * enforcement instead of l1-process. Verified/trusted stay on L1.
    */
-  private readonly containerIsolation: boolean;
+  readonly containerIsolation: boolean;
 
   constructor(filePath: string, containerIsolation = false) {
     this.filePath = filePath;
@@ -95,40 +236,11 @@ export class ManifestResolver {
       return override;
     }
 
-    const tier = TIER_DEFAULTS[trustTier];
-
-    // Escalate untrusted tiers to container isolation when enabled.
-    const enforcement: EnforcementLevel =
-      this.containerIsolation &&
-      (trustTier === "community" || trustTier === "unknown")
-        ? "l2-container"
-        : tier.enforcement;
-
-    // Build the env allowlist from the server's declared auth vars plus any
-    // vars the user explicitly passed (they clearly intend those to flow).
-    const declaredEnv = (registryServer?.authDetails?.envVars ?? []).map(
-      (e) => e.name,
-    );
-    const allEnv = new Set<string>([...declaredEnv, ...userProvidedEnvKeys]);
-
-    return {
-      version: 1,
-      slug,
-      enforcement,
-      env: {
-        allow: [...allEnv],
-        inheritDefaults: tier.inheritDefaults,
-      },
-      network: {
-        mode: tier.network,
-        allow: [],
-      },
-      filesystem: {
-        read: [],
-        write: [],
-      },
-      subprocess: tier.subprocess,
-    };
+    return tierDefaults(slug, trustTier, {
+      containerIsolation: this.containerIsolation,
+      registryServer,
+      userProvidedEnvKeys,
+    });
   }
 
   /** Get a saved override for a slug, if one exists. */

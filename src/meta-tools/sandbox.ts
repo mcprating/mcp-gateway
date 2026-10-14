@@ -1,8 +1,14 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ConnectionManager } from "../connection/connection-manager.js";
-import { ManifestResolver } from "../sandbox/manifest-resolver.js";
-import type { CapabilityManifest, NetworkMode, EnforcementLevel } from "../sandbox/types.js";
+import { RegistryClient } from "../registry/registry-client.js";
+import {
+  ManifestResolver,
+  overrideForSet,
+  type OverrideStart,
+  type TrustLookup,
+} from "../sandbox/manifest-resolver.js";
+import type { CapabilityManifest } from "../sandbox/types.js";
 import { toolError } from "../utils/errors.js";
 
 /**
@@ -11,16 +17,18 @@ import { toolError } from "../utils/errors.js";
  *
  *  - view:  show the effective/saved manifest + a human-readable summary
  *  - set:   override fields (network, env, filesystem, subprocess, enforcement)
- *           — takes effect on the next connection to that server
+ *           — the rest keep what the server would otherwise run with; takes
+ *           effect on the next connection to that server
  *  - reset: clear the override, reverting to trust-tier defaults
  */
 export function registerSandbox(
   server: McpServer,
   connectionManager: ConnectionManager,
+  registryClient: RegistryClient,
 ): void {
   server.tool(
     "mcp_sandbox",
-    "View or customize a server's sandbox capability manifest (env/network/filesystem/subprocess access). Use action 'view' to inspect, 'set' to tighten or loosen grants (applies on next connect), or 'reset' to revert to defaults.",
+    "View or customize a server's sandbox capability manifest (env/network/filesystem/subprocess access). Use action 'view' to inspect, 'set' to tighten or loosen grants (only the fields you pass change, the rest keep what the server has now or would get by default; applies on next connect), or 'reset' to revert to defaults.",
     {
       action: z
         .enum(["view", "set", "reset"])
@@ -80,49 +88,69 @@ export function registerSandbox(
         }
 
         // ── SET ────────────────────────────────────────────────────────────
-        // Start from existing override / live manifest / a locked baseline.
-        const conn = connectionManager.getConnection(slug);
-        const base: CapabilityManifest =
-          resolver.getOverride(slug) ??
-          conn?.manifest ?? {
-            version: 1,
-            slug,
-            enforcement: "l1-process",
-            env: { allow: [], inheritDefaults: true },
-            network: { mode: "none", allow: [] },
-            filesystem: { read: [], write: [] },
-            subprocess: false,
-          };
-
-        const updated: CapabilityManifest = {
-          ...base,
+        // Change only the fields given, on top of the saved override, else the
+        // live connection's manifest, else what a connect would resolve. Only
+        // that last one needs the trust tier, and so the registry.
+        const saved = resolver.getOverride(slug);
+        const live = connectionManager.getConnection(slug)?.manifest;
+        const lookup = saved || live ? undefined : await lookUpTrust(registryClient, slug);
+        const { manifest: updated, start } = overrideForSet(
           slug,
-          enforcement: (params.enforcement as EnforcementLevel) ?? base.enforcement,
-          env: {
-            allow: params.envAllow ?? base.env.allow,
-            inheritDefaults: base.env.inheritDefaults,
+          {
+            enforcement: params.enforcement,
+            network: params.network,
+            networkAllow: params.networkAllow,
+            envAllow: params.envAllow,
+            fsRead: params.fsRead,
+            fsWrite: params.fsWrite,
+            subprocess: params.subprocess,
           },
-          network: {
-            mode: (params.network as NetworkMode) ?? base.network.mode,
-            allow: params.networkAllow ?? base.network.allow,
-          },
-          filesystem: {
-            read: params.fsRead ?? base.filesystem.read,
-            write: params.fsWrite ?? base.filesystem.write,
-          },
-          subprocess: params.subprocess ?? base.subprocess,
-        };
+          { saved, live, lookup },
+          resolver.containerIsolation,
+        );
 
         resolver.saveOverride(updated);
 
         return text(
-          `## 🛡️ Sandbox override saved for \`${slug}\`\n\n${renderManifest(slug, updated, false)}\n\n_Takes effect on the next connection. Reconnect to apply._`,
+          `## 🛡️ Sandbox override saved for \`${slug}\`\n\n${describeStart(slug, start)}\n\n${renderManifest(slug, updated, false)}\n\n_Takes effect on the next connection. Reconnect to apply._`,
         );
       } catch (err) {
         return toolError(err instanceof Error ? err.message : String(err));
       }
     },
   );
+}
+
+/** A slug's trust tier as the registry gives it, the way a connect by slug looks it up. */
+async function lookUpTrust(registryClient: RegistryClient, slug: string): Promise<TrustLookup> {
+  try {
+    const server = await registryClient.getServer(slug);
+    if (!server) return { status: "not-found" };
+    return { status: "found", server, trustTier: RegistryClient.determineTrustTier(server) };
+  } catch {
+    return { status: "unreachable" };
+  }
+}
+
+/** What the saved override was built on. Fields the call didn't pass came from it. */
+function describeStart(slug: string, start: OverrideStart): string {
+  switch (start.from) {
+    case "override":
+      return "Changed the saved override; fields you didn't pass kept their saved values.";
+    case "connection":
+      return "Started from the live connection's manifest; fields you didn't pass kept its values.";
+    case "defaults": {
+      const tier = `\`${start.trustTier}\``;
+      switch (start.lookup) {
+        case "found":
+          return `No saved override and not connected, so this started from what a connect would use: the ${tier} trust tier's defaults and the env vars the server's registry record declares. Fields you didn't pass kept those values.`;
+        case "not-found":
+          return `No saved override and not connected, and \`${slug}\` isn't a registry slug, so this started from the ${tier} trust tier's defaults, which a connect by command or URL also gets. Fields you didn't pass kept those values.`;
+        case "unreachable":
+          return `No saved override and not connected, and the MCP-Rating registry couldn't be reached to look up \`${slug}\`, so this started from the ${tier} trust tier's defaults, the most locked down. If the server declares env vars it needs (an API key), they aren't in this override: pass them in \`envAllow\`, or \`reset\` and set again once the registry answers.`;
+      }
+    }
+  }
 }
 
 function renderManifest(
