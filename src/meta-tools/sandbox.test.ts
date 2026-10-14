@@ -67,7 +67,13 @@ function setup(opts: {
           : undefined,
       lastTrust: (slug: string) => (slug === at ? opts.attempt : undefined),
     } as never,
-    { getServer } as never,
+    {
+      getServer,
+      registries: [
+        { label: "mcprating.io", kind: "mcprating" },
+        { label: "registry.acme.internal", kind: "mcp-registry" },
+      ],
+    } as never,
   );
   const set = async (input: Record<string, unknown> = REGISTRY_ONLY) => {
     const res = await handler(input);
@@ -146,15 +152,17 @@ describe("mcp_sandbox set", () => {
     expect(text).toContain("`community` trust tier");
   });
 
-  it("falls back to unknown when the registry can't be reached, and says what that leaves out", async () => {
+  it("falls back to unknown when no registry answers, and says what that leaves out", async () => {
     const { set } = setup({
       getServer: async () => {
-        throw new Error("Failed to reach MCP-Rating registry");
+        throw new Error('No registry answered for "srv"');
       },
     });
     const { text, saved } = await set();
     expect(saved).toMatchObject({ enforcement: "l2-container", env: { allow: [] } });
-    expect(text).toContain("couldn't be reached");
+    // Every configured registry was asked, not only MCP Rating's.
+    expect(text).toContain("no registry answered when asked about `srv` (mcprating.io, registry.acme.internal)");
+    expect(text).not.toContain("MCP-Rating registry");
     expect(text).toContain("envAllow");
   });
 
