@@ -56,9 +56,9 @@ const TIER_DEFAULTS: Record<
 
 /**
  * The manifest a server with no saved override gets: its trust tier's
- * defaults, the auth env vars its registry record declares, and any env names
- * the user passed at connect. Pure, so mcp_sandbox "set" can start from
- * exactly what a connect would resolve.
+ * defaults and the auth env vars its registry record declares. Pure, so
+ * mcp_sandbox "set" can start from exactly what a connect would resolve.
+ * (A connect then adds the env names passed to it: withConnectEnv.)
  */
 export function tierDefaults(
   slug: string,
@@ -67,8 +67,6 @@ export function tierDefaults(
     /** Escalate community/unknown to l2-container (MCP_GATEWAY_CONTAINER_ISOLATION). */
     containerIsolation: boolean;
     registryServer?: RegistryServer | null;
-    /** Env var names the user explicitly supplied at connect time. */
-    userProvidedEnvKeys?: string[];
   },
 ): CapabilityManifest {
   const tier = TIER_DEFAULTS[trustTier];
@@ -80,19 +78,17 @@ export function tierDefaults(
       ? "l2-container"
       : tier.enforcement;
 
-  // Build the env allowlist from the server's declared auth vars plus any
-  // vars the user explicitly passed (they clearly intend those to flow).
+  // The env allowlist is the server's declared auth vars.
   const declaredEnv = (opts.registryServer?.authDetails?.envVars ?? []).map(
     (e) => e.name,
   );
-  const allEnv = new Set<string>([...declaredEnv, ...(opts.userProvidedEnvKeys ?? [])]);
 
   return {
     version: 1,
     slug,
     enforcement,
     env: {
-      allow: [...allEnv],
+      allow: [...new Set(declaredEnv)],
       inheritDefaults: tier.inheritDefaults,
     },
     network: {
@@ -105,6 +101,26 @@ export function tierDefaults(
     },
     subprocess: tier.subprocess,
   };
+}
+
+/**
+ * `manifest` as one connect applies it: with the env var names passed to that
+ * connect allowed too, saved override or not. The user handed the server
+ * those values, and buildScopedEnvironment always lets them through, but
+ * under L2 only names in env.allow are forwarded into the container. An
+ * override used to be applied as saved, so a contained server with one never
+ * received them.
+ *
+ * Returns `manifest` itself when there is nothing to add; never changes it,
+ * since it may be the saved override.
+ */
+export function withConnectEnv(
+  manifest: CapabilityManifest,
+  userProvidedEnvKeys: string[],
+): CapabilityManifest {
+  const added = [...new Set(userProvidedEnvKeys)].filter((k) => !manifest.env.allow.includes(k));
+  if (added.length === 0) return manifest;
+  return { ...manifest, env: { ...manifest.env, allow: [...manifest.env.allow, ...added] } };
 }
 
 /** What the registry said when asked about a slug outside a connect. */
@@ -221,7 +237,8 @@ export class ManifestResolver {
    * Resolve the effective manifest for a server. Uses a saved override if one
    * exists; otherwise derives defaults from the trust tier and the server's
    * declared auth env vars (so e.g. a GitHub server gets GITHUB_TOKEN allowed
-   * but nothing else).
+   * but nothing else). Either way, the env names passed to this connect are
+   * allowed too.
    */
   resolve(
     slug: string,
@@ -233,14 +250,14 @@ export class ManifestResolver {
     const override = this.overrides.get(slug);
     if (override) {
       log.debug("Using saved manifest override", { slug });
-      return override;
     }
-
-    return tierDefaults(slug, trustTier, {
-      containerIsolation: this.containerIsolation,
-      registryServer,
-      userProvidedEnvKeys,
-    });
+    const manifest =
+      override ??
+      tierDefaults(slug, trustTier, {
+        containerIsolation: this.containerIsolation,
+        registryServer,
+      });
+    return withConnectEnv(manifest, userProvidedEnvKeys);
   }
 
   /** Get a saved override for a slug, if one exists. */

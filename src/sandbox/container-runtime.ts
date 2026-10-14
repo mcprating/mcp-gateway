@@ -227,17 +227,16 @@ export function offlineStartProblem(
     return lines.join("\n");
   }
 
-  // mcp_sandbox "set" on a server with no saved override starts from what a
-  // connect resolves for its trust tier, so the container and the env vars
-  // the registry declares carry over. Names passed in mcp_connect's `env`
-  // don't, as only that connect knew them: restate the env names allowed.
+  // mcp_sandbox "set" keeps everything but the network: a server with no
+  // saved override starts from what a connect resolves for its trust tier,
+  // container and declared env vars included, and every connect adds the env
+  // names passed to it. So the call names only what changes.
   const hosts = launch.downloadHosts;
   const sandboxArgs = [
     `action: "set"`,
     `slug: ${JSON.stringify(slug)}`,
     `network: "allowlist"`,
     `networkAllow: ${JSON.stringify(hosts)}`,
-    ...(manifest.env.allow.length > 0 ? [`envAllow: ${JSON.stringify(manifest.env.allow)}`] : []),
   ];
   lines.push(
     "Either, then call mcp_connect again:",
