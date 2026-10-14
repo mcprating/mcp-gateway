@@ -9,7 +9,12 @@ import { TRUST_LABELS } from "../permissions/trust-tiers.js";
 import type { DownstreamConnection, DownstreamTool } from "../connection/types.js";
 import { log } from "../utils/logger.js";
 import type { UsageTracker } from "../analytics/usage-tracker.js";
-import type { AdTracker } from "../ads/ad-tracker.js";
+import {
+  admitToolCall,
+  completeToolCall,
+  recordFailedToolCall,
+  type ToolCallDeps,
+} from "./call-checks.js";
 
 const SEPARATOR = "__";
 
@@ -36,15 +41,18 @@ export function isTaskTool(tool: DownstreamTool): boolean {
  *    the background loop keeps current. No manual task-ID mapping is needed
  *    because the upstream store owns the upstream task identity.
  *
+ * The call goes through the same checks as a plain one (call-checks.ts): the
+ * permission policy and plugin hooks before it starts, and the audit entry,
+ * plugin hooks and personal-data guard on its result. It used to get none of
+ * them — a task-based tool ran unaudited.
+ *
  * Returns a `{ remove }` handle for cleanup, matching the plain-tool path.
  */
 export function registerTaskProxyTool(
   mcpServer: McpServer,
   connection: DownstreamConnection,
   tool: DownstreamTool,
-  proxyTimeoutMs: number,
-  usageTracker?: UsageTracker,
-  adTracker?: AdTracker | null,
+  deps: ToolCallDeps,
 ): { remove: () => void } {
   const nsName = `${connection.slug}${SEPARATOR}${tool.name}`;
   const trustLabel = TRUST_LABELS[connection.trustTier];
@@ -84,6 +92,15 @@ export function registerTaskProxyTool(
           ttl: extra.taskRequestedTtl ?? 300_000,
         });
 
+        // Refused: the task exists, so it ends as failed with the refusal.
+        const admitted = await admitToolCall(connection, tool.name, args, deps);
+        if ("refused" in admitted) {
+          await extra.taskStore
+            .storeTaskResult(task.taskId, "failed", admitted.refused)
+            .catch(() => {});
+          return { task };
+        }
+
         log.debug("Task created, starting downstream stream", {
           nsName,
           taskId: task.taskId,
@@ -94,13 +111,11 @@ export function registerTaskProxyTool(
         void driveDownstreamTask({
           connection,
           tool,
-          args,
+          args: admitted.args,
           upstreamTaskId: task.taskId,
           taskStore: extra.taskStore,
-          proxyTimeoutMs,
           startedAt,
-          usageTracker,
-          adTracker,
+          deps,
         });
 
         return { task };
@@ -140,21 +155,11 @@ async function driveDownstreamTask(opts: {
   args: Record<string, unknown>;
   upstreamTaskId: string;
   taskStore: CreateTaskRequestHandlerExtra["taskStore"];
-  proxyTimeoutMs: number;
   startedAt: number;
-  usageTracker?: UsageTracker;
-  adTracker?: AdTracker | null;
+  deps: ToolCallDeps;
 }): Promise<void> {
-  const {
-    connection,
-    tool,
-    args,
-    upstreamTaskId,
-    taskStore,
-    startedAt,
-    usageTracker,
-    adTracker,
-  } = opts;
+  const { connection, tool, args, upstreamTaskId, taskStore, startedAt, deps } = opts;
+  const { usageTracker, adTracker } = deps;
 
   try {
     const stream = connection.client.experimental.tasks.callToolStream({
@@ -180,7 +185,13 @@ async function driveDownstreamTask(opts: {
           await taskStore.storeTaskResult(
             upstreamTaskId,
             "completed",
-            message.result,
+            await completeToolCall(
+              connection,
+              tool.name,
+              args,
+              message.result as CallToolResult,
+              deps,
+            ),
           );
           recordUsage(usageTracker, connection, tool, startedAt, true);
           if (adTracker) {
@@ -201,6 +212,7 @@ async function driveDownstreamTask(opts: {
             isError: true,
           });
           recordUsage(usageTracker, connection, tool, startedAt, false, errMsg);
+          recordFailedToolCall(connection, tool.name, errMsg, deps);
           return;
         }
 
@@ -225,6 +237,7 @@ async function driveDownstreamTask(opts: {
       })
       .catch(() => {});
     recordUsage(usageTracker, connection, tool, startedAt, false, "no result");
+    recordFailedToolCall(connection, tool.name, "task ended without a result", deps);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.error("Downstream task stream failed", {
@@ -244,6 +257,7 @@ async function driveDownstreamTask(opts: {
       })
       .catch(() => {});
     recordUsage(usageTracker, connection, tool, startedAt, false, msg);
+    recordFailedToolCall(connection, tool.name, msg, deps);
   }
 }
 
