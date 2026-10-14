@@ -169,7 +169,7 @@ export function registerSandbox(
             ? ` The live connection runs as \`${conn.manifest.enforcement}\`: no container engine (Docker or Podman) was found when it connected.`
             : "";
         return text(
-          `## 🛡️ Sandbox override saved for \`${slug}\`\n\n${named}${describeStart(slug, start)}${fellBack}\n\n${renderManifest(slug, updated)}\n\n_Takes effect on the next connection. Reconnect to apply._`,
+          `## 🛡️ Sandbox override saved for \`${slug}\`\n\n${named}${describeStart(slug, start, registryClient.registries.map((r) => r.label))}${fellBack}\n\n${renderManifest(slug, updated)}\n\n_Takes effect on the next connection. Reconnect to apply._`,
         );
       } catch (err) {
         return toolError(err instanceof Error ? err.message : String(err));
@@ -190,7 +190,7 @@ async function lookUpTrust(registryClient: RegistryClient, slug: string): Promis
 }
 
 /** What the saved override was built on. Fields the call didn't pass came from it. */
-function describeStart(slug: string, start: OverrideStart): string {
+function describeStart(slug: string, start: OverrideStart, registries: string[]): string {
   switch (start.from) {
     case "override":
       return "Changed the saved override; fields you didn't pass kept their saved values.";
@@ -206,7 +206,9 @@ function describeStart(slug: string, start: OverrideStart): string {
         case "not-found":
           return `No saved override, not connected, and no connect tried since the gateway started, and \`${slug}\` isn't a registry slug, so this started from the ${tier} trust tier's defaults, the most locked down. A slug like this usually comes from a command, and a connect by command takes its tier from what MCP Rating knows of the package it runs, which this slug doesn't say. If MCP Rating knows the package, this override is stricter than the connect's defaults: \`reset\`, try mcp_connect once (even a refused or failed attempt records the tier), then set again. Fields you didn't pass kept those values.`;
         case "unreachable":
-          return `No saved override and not connected, and the MCP-Rating registry couldn't be reached to look up \`${slug}\`, so this started from the ${tier} trust tier's defaults, the most locked down. If the server declares env vars it needs (an API key), they aren't in this override: pass them in \`envAllow\`, or \`reset\` and set again once the registry answers.`;
+          // The gateway asks every configured registry, not only MCP Rating's,
+          // and a lookup fails only when none of them answered.
+          return `No saved override and not connected, and no registry answered when asked about \`${slug}\`${registries.length > 0 ? ` (${registries.join(", ")})` : ""}, so this started from the ${tier} trust tier's defaults, the most locked down. If the server declares env vars it needs (an API key), they aren't in this override: pass them in \`envAllow\`, or \`reset\` and set again once a registry answers.`;
       }
     }
   }
