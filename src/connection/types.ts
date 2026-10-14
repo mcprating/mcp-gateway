@@ -99,7 +99,8 @@ export interface DownstreamConnection {
   /**
    * The manifest the connect resolved, when it couldn't run it: l2-container
    * with no Docker or Podman to start one, so `manifest` records the
-   * l1-process it fell back to. mcp_sandbox view and the set reply say so.
+   * l1-process it fell back to. mcp_sandbox view and the connect summary say
+   * so, and tell the user to start an engine rather than to turn on isolation.
    */
   resolvedManifest?: CapabilityManifest;
 

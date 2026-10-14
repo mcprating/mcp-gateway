@@ -4,7 +4,9 @@ import type { ConnectionManager } from "../connection/connection-manager.js";
 import { RegistryClient } from "../registry/registry-client.js";
 import {
   ManifestResolver,
+  containmentRemedy,
   overrideForSet,
+  type ContainmentRemedy,
   type OverrideStart,
   type TrustLookup,
 } from "../sandbox/manifest-resolver.js";
@@ -86,14 +88,22 @@ export function registerSandbox(
 
           const fellBack = conn?.manifest && conn.resolvedManifest;
           return text(
-            renderManifest(
-              slug,
-              manifest,
-              Boolean(conn),
-              fellBack
+            renderManifest(slug, manifest, {
+              live: Boolean(conn),
+              note: fellBack
                 ? `Runs as \`${manifest.enforcement}\`: its manifest asks for \`${fellBack.enforcement}\`, but no container engine (Docker or Podman) was found when it connected.`
                 : undefined,
-            ),
+              // What would contain a live server depends on how it got here;
+              // a saved override keeps the default, which always applies.
+              remedy: conn?.manifest
+                ? containmentRemedy({
+                    resolved: conn.resolvedManifest ?? conn.manifest,
+                    trustTier: conn.trustTier,
+                    containerIsolation: resolver.containerIsolation,
+                    hasOverride: Boolean(resolver.getOverride(slug)),
+                  })
+                : undefined,
+            }),
           );
         }
 
@@ -132,7 +142,7 @@ export function registerSandbox(
             ? ` The live connection runs as \`${conn.manifest.enforcement}\`: no container engine (Docker or Podman) was found when it connected.`
             : "";
         return text(
-          `## 🛡️ Sandbox override saved for \`${slug}\`\n\n${describeStart(slug, start)}${fellBack}\n\n${renderManifest(slug, updated, false)}\n\n_Takes effect on the next connection. Reconnect to apply._`,
+          `## 🛡️ Sandbox override saved for \`${slug}\`\n\n${describeStart(slug, start)}${fellBack}\n\n${renderManifest(slug, updated)}\n\n_Takes effect on the next connection. Reconnect to apply._`,
         );
       } catch (err) {
         return toolError(err instanceof Error ? err.message : String(err));
@@ -176,14 +186,13 @@ function describeStart(slug: string, start: OverrideStart): string {
 function renderManifest(
   slug: string,
   manifest: CapabilityManifest,
-  isLive: boolean,
-  note?: string,
+  opts: { live?: boolean; note?: string; remedy?: ContainmentRemedy } = {},
 ): string {
-  const summary = ManifestResolver.summarize(manifest);
+  const summary = ManifestResolver.summarize(manifest, opts.remedy);
   const lines = [
-    `## 🛡️ Sandbox: \`${slug}\`${isLive ? " (active connection)" : ""}`,
+    `## 🛡️ Sandbox: \`${slug}\`${opts.live ? " (active connection)" : ""}`,
     `**Enforcement:** ${manifest.enforcement}`,
-    ...(note ? ["", note] : []),
+    ...(opts.note ? ["", opts.note] : []),
     "",
     "**Grants:**",
     ...summary.lines.map((l) => `- ${l}`),

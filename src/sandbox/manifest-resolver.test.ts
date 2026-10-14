@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   ManifestResolver,
+  containmentRemedy,
   overrideForSet,
   tierDefaults,
   withConnectEnv,
+  type ContainmentRemedy,
   type ManifestChanges,
 } from "./manifest-resolver.js";
 import type { RegistryServer, TrustTier } from "../registry/types.js";
@@ -254,5 +256,76 @@ describe("overrideForSet", () => {
       filesystem: { read: [], write: ["/out"] },
       subprocess: true,
     });
+  });
+});
+
+/**
+ * The summary of a server outside a container ends its Files line with what
+ * would contain it, and used to say "set MCP_GATEWAY_CONTAINER_ISOLATION=true"
+ * every time: also where that was already on, for a verified server or one
+ * that fell back to L1 for want of Docker or Podman, and where a saved
+ * override decides the enforcement whatever the setting says.
+ */
+describe("containmentRemedy", () => {
+  const L1 = manifest({ enforcement: "l1-process" });
+  const remedy = (over: Partial<Parameters<typeof containmentRemedy>[0]>) =>
+    containmentRemedy({
+      resolved: L1,
+      trustTier: "community",
+      containerIsolation: false,
+      hasOverride: false,
+      ...over,
+    });
+
+  it("asks for an engine when the manifest wanted a container, whatever else holds", () => {
+    for (const trustTier of ALL_TIERS) {
+      for (const containerIsolation of [true, false]) {
+        for (const hasOverride of [true, false]) {
+          expect(remedy({ resolved: manifest(), trustTier, containerIsolation, hasOverride })).toBe("start-engine");
+        }
+      }
+    }
+  });
+
+  it("suggests the isolation setting only for the tiers it escalates", () => {
+    expect(ALL_TIERS.map((trustTier) => remedy({ trustTier }))).toEqual([
+      "set-enforcement",
+      "set-enforcement",
+      "enable-isolation",
+      "enable-isolation",
+    ]);
+  });
+
+  it("never suggests the setting when it is already on, or when a saved override decides", () => {
+    for (const trustTier of ALL_TIERS) {
+      expect(remedy({ trustTier, containerIsolation: true })).toBe("set-enforcement");
+      expect(remedy({ trustTier, hasOverride: true })).toBe("set-enforcement");
+    }
+  });
+});
+
+describe("ManifestResolver.summarize", () => {
+  const L1 = manifest({ enforcement: "l1-process" });
+  const files = (m: CapabilityManifest, remedy?: ContainmentRemedy) =>
+    ManifestResolver.summarize(m, remedy).lines.find((l) => l.startsWith("Files:"));
+
+  it("ends an uncontained server's Files line with what would contain it", () => {
+    expect(files(L1, "start-engine")).toContain("no Docker or Podman was found; start one and reconnect to restrict");
+    expect(files(L1, "enable-isolation")).toContain("(set MCP_GATEWAY_CONTAINER_ISOLATION=true to restrict)");
+    expect(files(L1, "set-enforcement")).toContain(
+      'mcp_sandbox({action: "set", slug: "srv", enforcement: "l2-container"})',
+    );
+  });
+
+  it("names the isolation setting only when turning it on would help", () => {
+    for (const r of [undefined, "start-engine", "set-enforcement"] as const) {
+      expect(files(L1, r)).not.toContain("MCP_GATEWAY_CONTAINER_ISOLATION");
+    }
+  });
+
+  it("gives a contained server no hint", () => {
+    for (const r of ["start-engine", "enable-isolation", "set-enforcement"] as const) {
+      expect(files(manifest(), r)).toBe("Files: 1 read path(s), 0 write path(s) mounted; nothing else from the host");
+    }
   });
 });
