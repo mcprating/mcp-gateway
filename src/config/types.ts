@@ -1,6 +1,19 @@
+/** One registry the gateway reads: the MCP Rating API, or one speaking the official MCP Registry API (v0.1). */
+export interface RegistryConfig {
+  type: "mcprating" | "mcp-registry";
+  url: string;
+}
+
 export interface GatewayConfig {
-  /** MCP-Rating API base URL for registry lookups */
+  /** MCP-Rating API base URL for registry lookups (and the partner programme) */
   registryApiUrl: string;
+
+  /**
+   * The registries mcp_discover and mcp_connect read, in order. Unset means
+   * MCP Rating alone, at registryApiUrl. MCP_GATEWAY_REGISTRIES replaces the
+   * whole list, so leaving MCP Rating out of it means the gateway never asks it.
+   */
+  registries?: RegistryConfig[];
 
   /** Timeout for proxied tool calls in milliseconds */
   proxyTimeoutMs: number;

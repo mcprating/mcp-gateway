@@ -47,6 +47,16 @@ export interface RegistryServer {
     attemptCount: number;
     verifiedCount: number;
   } | null;
+  /** The registry this came from (its host), set by the source that returned it. */
+  source?: string;
+  /** The server's official registry name (`io.github.owner/server`), when it has one. */
+  registryName?: string | null;
+  /**
+   * What mcp_connect takes to find this server again, in any session: its slug,
+   * or — for a registry that keys servers by name — its registry name. Unset
+   * means the slug.
+   */
+  ref?: string;
 }
 
 /** Paginated list response from the API */
@@ -55,6 +65,8 @@ export interface RegistryListResponse {
   total: number;
   limit: number;
   offset: number;
+  /** Registries that didn't answer this search, when others did. */
+  unreachable?: string[];
 }
 
 /** Trust tiers derived from registry data */

@@ -67,13 +67,17 @@ export function registerServerInfo(
             await import("../registry/registry-client.js")
           ).RegistryClient.determineTrustTier(registryData);
           const tierLabel = TRUST_LABELS[tier];
-          const score = registryData.qualityScore ?? 0;
+          // A server from another registry has no score: say so, not "0/100".
+          const score =
+            registryData.qualityScore === null || registryData.qualityScore === undefined
+              ? "unrated"
+              : `${registryData.qualityScore}/100`;
           const breakdown = registryData.metadata?.scoreBreakdown as
             | Record<string, number>
             | undefined;
 
-          lines.push("### Registry Info");
-          lines.push(`**Quality Score:** ${score}/100 · **Trust:** [${tierLabel}]`);
+          lines.push(registryData.source ? `### Registry Info (${registryData.source})` : "### Registry Info");
+          lines.push(`**Quality Score:** ${score} · **Trust:** [${tierLabel}]`);
 
           if (breakdown) {
             lines.push(

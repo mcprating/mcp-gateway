@@ -4,7 +4,7 @@ import type { GatewayConfig } from "../config/types.js";
 
 /**
  * A server that crashed used to come back from originalParams: no container,
- * no scoped environment â€” the sandboxed server restarted on the host with the
+ * no scoped environment — the sandboxed server restarted on the host with the
  * gateway's whole environment. These tests start a "sandboxed" server, crash it,
  * and look at what the reconnect launched.
  */
@@ -117,7 +117,7 @@ describe("auto-reconnect", () => {
     await cm.disconnect(first.slug, { removeProfile: false });
   });
 
-  it("keeps the egress proxy URL â€” the same proxy â€” across a reconnect", async () => {
+  it("keeps the egress proxy URL — the same proxy — across a reconnect", async () => {
     const { cm } = manager(manifest({ mode: "allowlist", allow: ["example.com:443"] }));
     await cm.connect({ command: "npx", args: ["-y", "some-server"], confirmed: true });
 
@@ -162,5 +162,47 @@ describe("auto-reconnect", () => {
       req.end();
     });
     expect(outcome).toBe("ECONNREFUSED");
+  });
+});
+
+describe("connecting by registry name", () => {
+  it("finds the server in whichever registry has it, and names the connection with a tool-safe slug", async () => {
+    const { RegistryClient } = await import("../registry/registry-client.js");
+    const { fromServerJson } = await import("../registry/sources/mcp-registry-source.js");
+    const entry = {
+      server: {
+        name: "io.github.Acme/notes-mcp",
+        packages: [{ registryType: "npm", identifier: "@acme/notes-mcp" }],
+      },
+    };
+    const empty = { lastSuccessfulCall: null, lastError: null, cacheSize: 0 };
+    const company = {
+      label: "registry.acme.internal",
+      kind: "mcp-registry" as const,
+      search: async () => ({ data: [], total: 0, limit: 10, offset: 0 }),
+      getServer: async () => null,
+      getByName: async (name: string) => (name === entry.server.name ? fromServerJson(entry, "registry.acme.internal") : null),
+      getStatus: () => empty,
+      clearCache: () => {},
+    };
+    const cm = new ConnectionManager(
+      mcpServer as never,
+      new RegistryClient([company]),
+      { isToolAllowed: () => true } as never,
+      config,
+    );
+
+    const summary = await cm.connect({ slug: "io.github.Acme/notes-mcp", confirmed: true });
+
+    expect(summary).toMatchObject({ slug: "io-github-acme-notes-mcp", trustTier: "unknown" });
+    expect(createTransport.mock.calls[0][0]).toMatchObject({
+      slug: "io-github-acme-notes-mcp",
+      command: "npx",
+      args: ["@acme/notes-mcp"],
+    });
+    await expect(cm.connect({ slug: "io.github.nobody/none", confirmed: true })).rejects.toThrow(
+      /not found in registry\.acme\.internal/,
+    );
+    await cm.disconnect("io-github-acme-notes-mcp", { removeProfile: false });
   });
 });

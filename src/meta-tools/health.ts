@@ -28,8 +28,17 @@ export function registerHealth(
       ];
 
       // Registry status
-      lines.push("### Registry");
-      if (registryStatus.lastSuccessfulCall) {
+      lines.push(registryStatus.registries.length > 1 ? "### Registries" : "### Registry");
+      if (registryStatus.registries.length > 1) {
+        for (const r of registryStatus.registries) {
+          const state = r.lastSuccessfulCall
+            ? `reachable (last success ${formatDuration(Date.now() - r.lastSuccessfulCall.getTime())} ago)`
+            : r.lastError
+              ? `unreachable — ${r.lastError}`
+              : "no calls made yet";
+          lines.push(`- **${r.label}** (${r.kind === "mcprating" ? "MCP Rating API" : "MCP Registry API"}): ${state}`);
+        }
+      } else if (registryStatus.lastSuccessfulCall) {
         const ago = formatDuration(
           Date.now() - registryStatus.lastSuccessfulCall.getTime(),
         );
