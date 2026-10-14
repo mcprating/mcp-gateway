@@ -14,7 +14,14 @@ import type { PluginManager } from "../plugins/plugin-manager.js";
 import type { AuditLog } from "../audit/audit-log.js";
 import { buildProgressForwarder } from "./progress-forwarder.js";
 import { isTaskTool, registerTaskProxyTool } from "./task-proxy.js";
-import { guardPersonalData } from "./personal-data-guard.js";
+import {
+  admitToolCall,
+  completeToolCall,
+  recordFailedToolCall,
+  type ToolCallDeps,
+} from "./call-checks.js";
+
+export type { ToolCallDeps } from "./call-checks.js";
 
 const SEPARATOR = "__";
 
@@ -63,6 +70,14 @@ export function registerProxiedTools(
 ): Map<string, { remove: () => void }> {
   const registered = new Map<string, { remove: () => void }>();
   const trustLabel = TRUST_LABELS[connection.trustTier];
+  const deps: ToolCallDeps = {
+    proxyTimeoutMs,
+    permissionManager,
+    adTracker,
+    usageTracker,
+    pluginManager,
+    auditLog,
+  };
 
   for (const tool of downstreamTools) {
     // Check tool-level permissions if a permission manager is provided
@@ -80,14 +95,7 @@ export function registerProxiedTools(
     // call. Route them to the dedicated task proxy.
     if (isTaskTool(tool)) {
       try {
-        const taskHandle = registerTaskProxyTool(
-          mcpServer,
-          connection,
-          tool,
-          proxyTimeoutMs,
-          usageTracker,
-          adTracker,
-        );
+        const taskHandle = registerTaskProxyTool(mcpServer, connection, tool, deps);
         registered.set(nsName, taskHandle);
       } catch (err) {
         log.warn("Failed to register task-proxy tool; skipping", {
@@ -122,15 +130,7 @@ export function registerProxiedTools(
         // import here and we only need two fields — captured by the
         // UpstreamProgressContext interface.
         extra?: unknown,
-      ) =>
-        callDownstreamTool(connection, tool.name, args, extra, {
-          proxyTimeoutMs,
-          permissionManager,
-          adTracker,
-          usageTracker,
-          pluginManager,
-          auditLog,
-        }),
+      ) => callDownstreamTool(connection, tool.name, args, extra, deps),
     );
 
     registered.set(nsName, handle);
@@ -139,22 +139,13 @@ export function registerProxiedTools(
   return registered;
 }
 
-/** What a downstream tool call is checked, tracked and recorded with. */
-export interface ToolCallDeps {
-  proxyTimeoutMs: number;
-  permissionManager?: PermissionManager;
-  adTracker?: AdTracker | null;
-  usageTracker?: UsageTracker;
-  pluginManager?: PluginManager;
-  auditLog?: AuditLog;
-}
-
 /**
  * One downstream tool call with everything the gateway promises around it: the
  * permission policy, plugin hooks, usage tracking, the audit entry, and the
- * personal-data guard. The proxied tools and `mcp_call_tool` both call this, so
- * neither path can skip what the other enforces. (`mcp_call_tool` used to call
- * the server directly: no permission check, no plugins, no audit entry.)
+ * personal-data guard (see call-checks.ts). The proxied tools and
+ * `mcp_call_tool` both call this, so neither path can skip what the other
+ * enforces. (`mcp_call_tool` used to call the server directly: no permission
+ * check, no plugins, no audit entry.)
  */
 export async function callDownstreamTool(
   connection: DownstreamConnection,
@@ -163,8 +154,7 @@ export async function callDownstreamTool(
   extra: unknown,
   deps: ToolCallDeps,
 ): Promise<CallToolResult> {
-  const { proxyTimeoutMs, permissionManager, adTracker, usageTracker, pluginManager, auditLog } =
-    deps;
+  const { proxyTimeoutMs, adTracker, usageTracker } = deps;
   const nsName = namespaceTool(connection.slug, toolName);
   const startedAt = Date.now();
 
@@ -174,62 +164,9 @@ export async function callDownstreamTool(
     server: connection.slug,
   });
 
-  // Checked on every call, not only when the tools are registered: a blocked
-  // tool is never registered, but `mcp_call_tool` can still name it.
-  if (permissionManager && !permissionManager.isToolAllowed(connection.slug, toolName)) {
-    log.info("Tool call blocked by permission policy", {
-      tool: toolName,
-      server: connection.slug,
-    });
-    auditLog?.record({
-      type: "tool_blocked",
-      slug: connection.slug,
-      tool: toolName,
-      enforcement: connection.manifest?.enforcement,
-      reason: "blocked by permission policy",
-    });
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: `Tool "${toolName}" on "${connection.slug}" is blocked by your permission policy.`,
-        },
-      ],
-      isError: true,
-    };
-  }
-
-  // Run plugin beforeToolCall hooks
-  if (pluginManager) {
-    const ctx = {
-      slug: connection.slug,
-      toolName,
-      args,
-      trustTier: connection.trustTier,
-    };
-    const modifiedCtx = await pluginManager.runBeforeToolCall(ctx);
-    if (modifiedCtx === null) {
-      // Plugin blocked the call
-      auditLog?.record({
-        type: "tool_blocked",
-        slug: connection.slug,
-        tool: toolName,
-        enforcement: connection.manifest?.enforcement,
-        reason: "blocked by gateway plugin",
-      });
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Tool call blocked by gateway plugin.`,
-          },
-        ],
-        isError: true,
-      };
-    }
-    // Use potentially modified args
-    args = modifiedCtx.args;
-  }
+  const admitted = await admitToolCall(connection, toolName, args, deps);
+  if ("refused" in admitted) return admitted.refused;
+  args = admitted.args;
 
   // Forward progress notifications back to the upstream client
   // using the upstream-supplied progress token (Bug A fix).
@@ -266,36 +203,7 @@ export async function callDownstreamTool(
       });
     }
 
-    // Safety audit: the tool ran under its sandbox enforcement level.
-    auditLog?.record({
-      type: "tool_call",
-      slug: connection.slug,
-      tool: toolName,
-      enforcement: connection.manifest?.enforcement,
-      ok: true,
-    });
-
-    // Run plugin afterToolCall hooks
-    let finalResult = result as CallToolResult;
-    if (pluginManager) {
-      finalResult = await pluginManager.runAfterToolCall(
-        {
-          slug: connection.slug,
-          toolName,
-          args,
-          trustTier: connection.trustTier,
-        },
-        finalResult,
-      );
-    }
-
-    // A server asking the model for personal data gets a warning the
-    // model reads with it, and an audit entry. See personal-data-guard.
-    return guardPersonalData(finalResult, {
-      slug: connection.slug,
-      tool: toolName,
-      auditLog,
-    });
+    return await completeToolCall(connection, toolName, args, result as CallToolResult, deps);
   } catch (err) {
     const durationMs = Date.now() - startedAt;
     const msg = err instanceof Error ? err.message : String(err);
@@ -316,15 +224,7 @@ export async function callDownstreamTool(
       });
     }
 
-    // Safety audit: the tool call errored (forensics — what failed).
-    auditLog?.record({
-      type: "tool_call",
-      slug: connection.slug,
-      tool: toolName,
-      enforcement: connection.manifest?.enforcement,
-      ok: false,
-      reason: msg.slice(0, 200),
-    });
+    recordFailedToolCall(connection, toolName, msg, deps);
 
     return {
       content: [
