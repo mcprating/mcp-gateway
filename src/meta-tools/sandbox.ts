@@ -6,6 +6,7 @@ import {
   ManifestResolver,
   containmentRemedy,
   overrideForSet,
+  overrideSlug,
   type ContainmentRemedy,
   type OverrideStart,
   type TrustLookup,
@@ -35,7 +36,11 @@ export function registerSandbox(
       action: z
         .enum(["view", "set", "reset"])
         .describe("view = inspect manifest; set = override grants; reset = revert to defaults"),
-      slug: z.string().describe("Server slug (as shown by mcp_list_active or mcp_discover)"),
+      slug: z
+        .string()
+        .describe(
+          "Server slug (as shown by mcp_list_active or mcp_discover), or its registry name (io.github.owner/server)",
+        ),
       enforcement: z
         .enum(["none", "l1-process", "l2-container"])
         .optional()
@@ -63,13 +68,26 @@ export function registerSandbox(
           return toolError("Sandbox is not enabled on this gateway.");
         }
 
-        const { action, slug } = params;
+        const { action } = params;
+
+        // A registry name is known by the slug a connect by it gives the
+        // server; its lookup also says the trust tier, which "set" may need.
+        const byName = params.slug.includes("/")
+          ? await lookUpTrust(registryClient, params.slug)
+          : undefined;
+        const key = overrideSlug(params.slug, byName);
+        if ("error" in key) return toolError(key.error);
+        const { slug } = key;
+        const named =
+          slug === params.slug
+            ? ""
+            : `\`${params.slug}\` is known here by its slug, \`${slug}\`, as a connect by that name is.\n\n`;
 
         // ── RESET ──────────────────────────────────────────────────────────
         if (action === "reset") {
           resolver.clearOverride(slug);
           return text(
-            `## 🛡️ Sandbox override cleared for \`${slug}\`\n\nThe server will use trust-tier defaults on the next connection.`,
+            `## 🛡️ Sandbox override cleared for \`${slug}\`\n\n${named}The server will use trust-tier defaults on the next connection.`,
           );
         }
 
@@ -82,17 +100,21 @@ export function registerSandbox(
 
           if (!manifest) {
             return text(
-              `## 🛡️ Sandbox: \`${slug}\`\n\nNo saved override and not currently connected. Trust-tier defaults will apply when you connect. Use \`mcp_sandbox({action: "set", slug: "${slug}", ...})\` to pre-configure grants.`,
+              `## 🛡️ Sandbox: \`${slug}\`\n\n${named}No saved override and not currently connected. Trust-tier defaults will apply when you connect. Use \`mcp_sandbox({action: "set", slug: "${slug}", ...})\` to pre-configure grants.`,
             );
           }
 
           const fellBack = conn?.manifest && conn.resolvedManifest;
+          const notes = [
+            named.trim(),
+            fellBack
+              ? `Runs as \`${manifest.enforcement}\`: its manifest asks for \`${fellBack.enforcement}\`, but no container engine (Docker or Podman) was found when it connected.`
+              : "",
+          ].filter(Boolean);
           return text(
             renderManifest(slug, manifest, {
               live: Boolean(conn),
-              note: fellBack
-                ? `Runs as \`${manifest.enforcement}\`: its manifest asks for \`${fellBack.enforcement}\`, but no container engine (Docker or Podman) was found when it connected.`
-                : undefined,
+              note: notes.length > 0 ? notes.join("\n\n") : undefined,
               // What would contain a live server depends on how it got here;
               // a saved override keeps the default, which always applies.
               remedy: conn?.manifest
@@ -111,14 +133,15 @@ export function registerSandbox(
         // Change only the fields given, on top of the saved override, else what
         // the next connect would resolve: the defaults for the server's trust
         // tier. A live connection says which tier and registry record those
-        // come from; without one, ask the registry.
+        // come from; without one, ask the registry: by name if that is what was
+        // passed, since another registry's server can't be found by its slug.
         const saved = resolver.getOverride(slug);
         const conn = connectionManager.getConnection(slug);
         const lookup: TrustLookup | undefined = saved
           ? undefined
           : conn
             ? { status: "connection", trustTier: conn.trustTier, server: conn.registryServer }
-            : await lookUpTrust(registryClient, slug);
+            : (byName ?? (await lookUpTrust(registryClient, slug)));
         const { manifest: updated, start } = overrideForSet(
           slug,
           {
@@ -142,7 +165,7 @@ export function registerSandbox(
             ? ` The live connection runs as \`${conn.manifest.enforcement}\`: no container engine (Docker or Podman) was found when it connected.`
             : "";
         return text(
-          `## 🛡️ Sandbox override saved for \`${slug}\`\n\n${describeStart(slug, start)}${fellBack}\n\n${renderManifest(slug, updated)}\n\n_Takes effect on the next connection. Reconnect to apply._`,
+          `## 🛡️ Sandbox override saved for \`${slug}\`\n\n${named}${describeStart(slug, start)}${fellBack}\n\n${renderManifest(slug, updated)}\n\n_Takes effect on the next connection. Reconnect to apply._`,
         );
       } catch (err) {
         return toolError(err instanceof Error ? err.message : String(err));
