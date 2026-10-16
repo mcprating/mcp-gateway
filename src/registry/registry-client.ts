@@ -81,6 +81,38 @@ function identities(s: RegistryServer): string[] {
 }
 
 /**
+ * The first http(s) endpoint in `metadata.remotes`. Anything else — a
+ * `javascript:` or `file:` URL in registry data somebody else wrote — is
+ * skipped, as the website's remoteLaunch does.
+ */
+function remoteEndpoint(server: RegistryServer): RemoteEndpoint | null {
+  const remotes = (server.metadata as { remotes?: unknown } | null | undefined)?.remotes;
+  if (!Array.isArray(remotes)) return null;
+  for (const r of remotes as Array<{ url?: unknown; type?: unknown; headers?: unknown } | null>) {
+    if (!r || typeof r.url !== "string") continue;
+    let parsed: URL;
+    try {
+      parsed = new URL(r.url);
+    } catch {
+      continue;
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") continue;
+    const headers = Array.isArray(r.headers)
+      ? (r.headers as Array<{ name?: unknown; isRequired?: unknown; isSecret?: unknown } | null>)
+      : [];
+    const requiredHeaders = headers
+      .filter((h) => h && typeof h.name === "string" && (h.isRequired === true || h.isSecret === true))
+      .map((h) => String(h!.name));
+    return {
+      url: parsed.href,
+      transportType: r.type === "sse" ? "sse" : "streamable-http",
+      requiredHeaders,
+    };
+  }
+  return null;
+}
+
+/**
  * The registries the gateway reads, as one: MCP Rating by default, or any list
  * of registries that speak the MCP Rating API or the official MCP Registry API
  * (MCP_GATEWAY_REGISTRIES). Searches go to all of them and are merged, the
@@ -346,36 +378,9 @@ export class RegistryClient {
     return null;
   }
 
-  /**
-   * The first http(s) endpoint in `metadata.remotes`. Anything else — a
-   * `javascript:` or `file:` URL in registry data somebody else wrote — is
-   * skipped, as the website's remoteLaunch does.
-   */
+  /** The first http(s) endpoint in `metadata.remotes` (remoteEndpoint). */
   resolveRemote(server: RegistryServer): RemoteEndpoint | null {
-    const remotes = (server.metadata as { remotes?: unknown } | null | undefined)?.remotes;
-    if (!Array.isArray(remotes)) return null;
-    for (const r of remotes as Array<{ url?: unknown; type?: unknown; headers?: unknown } | null>) {
-      if (!r || typeof r.url !== "string") continue;
-      let parsed: URL;
-      try {
-        parsed = new URL(r.url);
-      } catch {
-        continue;
-      }
-      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") continue;
-      const headers = Array.isArray(r.headers)
-        ? (r.headers as Array<{ name?: unknown; isRequired?: unknown; isSecret?: unknown } | null>)
-        : [];
-      const requiredHeaders = headers
-        .filter((h) => h && typeof h.name === "string" && (h.isRequired === true || h.isSecret === true))
-        .map((h) => String(h!.name));
-      return {
-        url: parsed.href,
-        transportType: r.type === "sse" ? "sse" : "streamable-http",
-        requiredHeaders,
-      };
-    }
-    return null;
+    return remoteEndpoint(server);
   }
 
   /**
@@ -428,7 +433,7 @@ export class RegistryClient {
     let tier: TrustTier;
     if (server.isVerified || (server.isOfficial && score >= 80)) {
       tier = "verified";
-    } else if (score >= 60 && server.repositoryUrl && server.installCommand) {
+    } else if (score >= 60 && server.repositoryUrl && (server.installCommand || remoteEndpoint(server))) {
       tier = "trusted";
     } else if (score >= 30) {
       tier = "community";

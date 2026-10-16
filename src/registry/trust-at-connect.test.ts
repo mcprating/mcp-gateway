@@ -57,6 +57,15 @@ describe("the trust tier", () => {
     expect(RegistryClient.determineTrustTier(server({ safetyScore: 20 }))).toBe("unknown");
     expect(RegistryClient.determineTrustTier(server({ safetyScore: 45, qualityScore: 35, isOfficial: false }))).toBe("community");
   });
+
+  it("counts a hosted server's endpoint as an install command, as MCP Rating does from 2026-10-16", () => {
+    const hosted = { isOfficial: false, qualityScore: 70, safetyScore: 90, installCommand: null };
+    const remotes = (url: string) => ({ remotes: [{ type: "streamable-http", url }] });
+    expect(RegistryClient.determineTrustTier(server({ ...hosted, metadata: remotes("https://mcp.example.com/mcp") }))).toBe("trusted");
+    expect(RegistryClient.determineTrustTier(server({ ...hosted, metadata: null }))).toBe("community");
+    expect(RegistryClient.determineTrustTier(server({ ...hosted, metadata: remotes("javascript:alert(1)") }))).toBe("community");
+    expect(RegistryClient.determineTrustTier(server({ ...hosted, repositoryUrl: null, metadata: remotes("https://mcp.example.com/mcp") }))).toBe("community");
+  });
 });
 
 describe("what MCP Rating knows, in words", () => {
