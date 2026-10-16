@@ -102,7 +102,7 @@ A manifest is resolved from (in priority order):
 | Tier | Env | Network | Subprocess |
 |------|-----|---------|-----------|
 | **Verified** (official + high quality) | declared + defaults | all | yes |
-| **Trusted** (good quality, has repo + install) | declared + defaults | all | yes |
+| **Trusted** (good quality, has repo + install command or remote endpoint) | declared + defaults | all | yes |
 | **Community** (listed in registry) | declared + defaults | allowlist | no |
 | **Unknown** (unverified origin) | minimal | none | no |
 

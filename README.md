@@ -253,7 +253,7 @@ The gateway exposes 13 built-in tools:
 Every connected server is labeled with a trust tier based on its MCP-Rating quality score:
 
 - **[Verified]** — High quality + officially verified
-- **[Trusted]** — Good quality with repository and install command
+- **[Trusted]** — Good quality with repository, and an install command or a remote endpoint
 - **[Community]** — Listed in registry with basic quality
 - **[Unverified]** — A package MCP Rating doesn't know, from any registry or started by command
 
