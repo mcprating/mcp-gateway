@@ -49,6 +49,21 @@ const observed = {
   relistedAfterNotification: null, // the answer
 };
 
+/**
+ * PROBE_EXTRA_TOOLS: comma-separated names listed beside probe_report, to see
+ * which names a client accepts. Kiro, for one, documents a rule that tool names
+ * match ^[a-zA-Z][a-zA-Z0-9_]*$ and stay within 64 characters, counting its
+ * server prefix. The gateway names a connected server's tools `slug__tool`,
+ * hyphens included. (Kiro 1.4.26 did not enforce the rule: its agent loaded a
+ * hyphenated and a 64-character name.) Ask the client's agent which tools it
+ * sees, or call one: a call reaches the report as a toolCalls entry.
+ */
+const EXTRA_TOOLS = String(process.env.PROBE_EXTRA_TOOLS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+if (EXTRA_TOOLS.length) observed.extraToolsListed = EXTRA_TOOLS;
+
 function save() {
   // Re-read identity on every save rather than once after connect().
   // connect() resolves before the initialize handshake completes, so reading
@@ -98,6 +113,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           "Call it to see whether your client honours tools/list_changed.",
         inputSchema: { type: "object", properties: {} },
       },
+      ...EXTRA_TOOLS.map((name) => ({
+        name,
+        description: `Probe tool named "${name}". Calling it records the call and returns the report.`,
+        inputSchema: { type: "object", properties: {} },
+      })),
     ],
   };
 });

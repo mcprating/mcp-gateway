@@ -201,6 +201,29 @@ claude mcp add gateway -- npx -y @mcp-rating/gateway
 }
 ```
 
+### Kiro
+
+[Add to Kiro](https://kiro.dev/launch/mcp/add?name=gateway&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40mcp-rating%2Fgateway%22%5D%7D)
+(Kiro asks before installing), or `~/.kiro/settings/mcp.json` (`.kiro/settings/mcp.json`
+in a workspace), same shape as Cursor:
+
+```json
+{
+  "mcpServers": {
+    "gateway": { "command": "npx", "args": ["-y", "@mcp-rating/gateway"] }
+  }
+}
+```
+
+Kiro runs MCP servers only when you are signed in, and if its MCP Servers panel
+shows **Enable MCP**, click it first.
+
+Kiro ignores `tools/list_changed`. It reads the gateway's tool list once, when it
+connects, so the tools of a server you connect later are never offered to the
+agent directly. Ask the agent to call them through `mcp_call_tool`, using the
+full `slug__tool` name that `mcp_connect` prints. Measured on Kiro 1.4.26 with
+`demo/client-probe.mjs`.
+
 ### Any other MCP client
 
 ```json
