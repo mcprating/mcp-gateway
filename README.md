@@ -47,82 +47,47 @@ connected on demand rather than pre-loaded.
 { "mcpServers": { "gateway": { "command": "npx", "args": ["-y", "@mcp-rating/gateway"] } } }
 ```
 
-## Why it uses less of your context
+## What it costs in context
 
-Every MCP server you configure statically injects its full tool schema into
-every turn, whether you use it or not. The gateway exposes 13 meta-tools at a
-fixed cost and loads a server's tools only once you connect to it.
+Context used to be this README's lead argument: 13 meta-tools in place of every
+configured server's full schema. That assumed the client sends every tool
+definition on every request. Claude Code, Cursor and Kiro don't by default: they
+give the model your tools' names and load a definition when it's needed.
 
-| | measured |
-|---|--:|
-| Median real MCP server | **2,587 tokens** |
-| 10 servers configured statically | **~25,900 tokens, every turn** |
-| Gateway, flat | **2,644 tokens** |
+We measured all three in October 2026 with ten popular servers' real tool lists,
+replayed through a stub so that no third-party code ran. Added to every request,
+compared with no MCP servers:
 
-Roughly **10× less** standing overhead at ten servers, and the gap widens with
-each one you add. One median server already costs about what the entire gateway
-costs.
+| | tools | Claude Code | Claude Code, tool search off | Cursor | Kiro (chars) |
+|---|--:|--:|--:|--:|--:|
+| 3 servers | 45 | +1,050 | +14,143 | +266 | +3,974 |
+| 9 servers | 125 | +3,085 | +77,656 | +910 | +7,693 |
+| 10 servers | 500 | +14,853 | +183,889 | +4,330 | +26,398 |
+| the gateway | 13 | +716 | +5,595 | +342 | +3,797 |
 
-### But standing overhead is not the bill — here is the break-even
+*Claude Code 2.1.308 (tokens as the API counts them), Cursor 3.17.21 (its own
+estimate), Kiro 1.4.26 (characters, from its log). Compare within a column. Most
+of the ten-server cost is one server with 375 tools.*
 
-That 10× is what *sits* in the window. It is not what a conversation costs,
-because the gateway also adds turns: it has to discover a server and connect to
-it before using it, every turn re-sends the whole transcript, and `mcp_discover`
-output stays in that transcript afterwards.
+The gateway also takes more requests: it has to find and connect a server before
+calling it, and those steps stay in the conversation, so every later request
+sends them again. Over an eight-turn Claude Code session with default settings,
+the gateway used about 597,000 prompt tokens. Three servers configured directly
+used 475,000, nine used 510,000 and ten used 710,000. The gateway drew level with
+ten at the third or fourth turn, and never with three or nine.
 
-Measured end to end on gemma-4-31B through vLLM, with the server's own tokenizer
-rather than an estimate:
+**So in these clients, don't use the gateway to save context.** It still does
+when your client sends every definition upfront (Claude Code with tool search
+off), or against a server with hundreds of tools over a longer session. With a
+few typical servers, configuring them directly is cheaper.
 
-| | tokens | turns |
-|---|--:|--:|
-| Gateway, cold — discover, connect, then call a tool | **17,904** | 5 |
-| Same tool call, server already configured | **6,605** | 2 |
-
-**With one server, the gateway costs 2.7× more than just configuring it.** The
-saving only appears once you have enough servers that carrying all their schemas
-outweighs the setup. N configured, one actually used, after ten turns of work:
-
-| servers | static | gateway | |
-|--:|--:|--:|---|
-| 1 | 25,870 | 70,524 | static wins 2.7× |
-| 2 | 51,740 | 70,524 | static wins 1.4× |
-| **4** | 103,480 | 70,524 | gateway wins 1.5× |
-| 10 | 258,700 | 70,524 | gateway wins 3.7× |
-| 20 | 517,400 | 70,524 | gateway wins 7.3× |
-
-**Break-even is three to five servers.** Below that, a hand-written config is
-genuinely cheaper and you should use one. Above it the gateway wins, and keeps
-winning as you add more — but the honest figure at ten servers is about **3×**
-on total tokens, not the 10× you get by counting standing overhead alone.
-
-*Honest about the method:* measured from the tool schemas of 91 servers this
-project has connected to and introspected — drawn from the 300 most-downloaded
-in the registry — summing `{name, description, inputSchema}` per tool, the
-payload a client actually receives from `tools/list`, sized as `chars / 4`. That
-is an estimate, not a tokenizer.
-
-**Median, not mean, and the distribution is why.** The mean is 9,965 tokens,
-dragged there by a long tail: 19 of the 91 cost over 10,000 tokens and the
-heaviest — a Spotify server exposing 608 tools — costs 135,666, about 68% of a
-200k context window on its own. Quoting the mean would flatter this project's
-numbers using servers almost nobody installs.
-
-The saving is real precisely because most configured servers sit unused in most
-conversations — but see the break-even above before assuming it applies to you.
-
-The `chars / 4` estimate was checked against three real tokenizers and came in at
-0.88×, 0.98× and 1.01× of the true count, so it never reads low.
-
-Reproduce both: `node demo/shorts/short2-context.mjs --refresh` for the schema
-corpus, and `demo/ollama-probe.mjs` for the end-to-end bill —
-
-```bash
-# gateway cold: must discover and connect first
-OLLAMA_HOST=http://host:8000/v1 node demo/ollama-probe.mjs your-model
-
-# baseline: server already attached, like a static config
-PRECONNECT=everything-slim OLLAMA_HOST=... node demo/ollama-probe.mjs your-model
-```
+Reproduce it with the scripts in
+[`demo/`](https://github.com/mcprating/mcp-gateway/tree/main/demo):
+`claude-code-tokens.mjs` (standing cost), `claude-code-whole-bill.mjs` (one
+task), `claude-code-session.mjs` (eight turns), `cursor-standing.mjs` and
+`kiro-standing.mjs`. Earlier versions of this section claimed 10× less context,
+then about 3×. Both came from our own harness, which sent every definition, like
+a client with tool search off.
 
 ## How It Works
 
