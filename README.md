@@ -81,6 +81,8 @@ when your client sends every definition upfront (Claude Code with tool search
 off), or against a server with hundreds of tools over a longer session. With a
 few typical servers, configuring them directly is cheaper.
 
+The full write-up, with the method, the one-task bill and what we don't claim:
+[MCP clients now load tool names, not schemas](https://mcprating.io/blog/clients-load-tool-names-now).
 Reproduce it with the scripts in
 [`demo/`](https://github.com/mcprating/mcp-gateway/tree/main/demo):
 `claude-code-tokens.mjs` (standing cost), `claude-code-whole-bill.mjs` (one
