@@ -5,7 +5,9 @@ import type { AdTracker } from "../ads/ad-tracker.js";
 import type { UsageTracker } from "../analytics/usage-tracker.js";
 import type { PluginManager } from "../plugins/plugin-manager.js";
 import type { AuditLog } from "../audit/audit-log.js";
+import { refusalMessage, type HumanGate } from "../permissions/human-gate.js";
 import { guardPersonalData } from "./personal-data-guard.js";
+import type { SensitiveData } from "./sensitive-data.js";
 import { log } from "../utils/logger.js";
 
 /**
@@ -22,6 +24,9 @@ export interface ToolCallDeps {
   usageTracker?: UsageTracker;
   pluginManager?: PluginManager;
   auditLog?: AuditLog;
+  humanGate?: HumanGate;
+  /** Absent when the human gate is off: then the model decides, as it does elsewhere. */
+  sensitiveData?: SensitiveData;
 }
 
 function refusal(text: string): CallToolResult {
@@ -29,8 +34,55 @@ function refusal(text: string): CallToolResult {
 }
 
 /**
+ * A secret the model read, on its way into a tool call, goes to the person. See
+ * sensitive-data.ts. Returns the refusal, or null if the call may go ahead.
+ *
+ * A call to the server the secret came from counts too: an http_post beside a
+ * read_file is how the data leaves. The exception is a tool that says it reaches
+ * nothing outside, as a write_file saving .env again can. MCP's default is that a
+ * tool may, so this needs the server to say so, and believing it risks nothing:
+ * a server lying about it already has the value, and it covers no other server's.
+ */
+async function checkForSecrets(
+  connection: DownstreamConnection,
+  toolName: string,
+  args: Record<string, unknown>,
+  deps: ToolCallDeps,
+): Promise<CallToolResult | null> {
+  const { sensitiveData, humanGate, auditLog } = deps;
+  if (!sensitiveData || !humanGate) return null;
+
+  const staysOnServer = connection.tools.get(toolName)?.annotations?.openWorldHint === false;
+  const found = sensitiveData.find(args, staysOnServer ? connection.slug : undefined);
+  if (!found) return null;
+
+  const secret = found.name ? `${found.name} from ${found.source}` : `a secret from ${found.source}`;
+  const approval = await humanGate.check({
+    slug: connection.slug,
+    key: JSON.stringify(["send", connection.slug, toolName, found.source, found.name]),
+    required: true,
+    summary: [
+      `An agent wants to send ${secret} to ${connection.slug}, in ${toolName} (${found.argument}).`,
+      "",
+      "Say yes only if you asked for this. A tool description or result from any connected server can tell an agent to do it.",
+    ].join("\n"),
+  });
+  if (approval.approved) return null;
+
+  auditLog?.record({
+    type: "tool_blocked",
+    slug: connection.slug,
+    tool: toolName,
+    enforcement: connection.manifest?.enforcement,
+    reason: `${secret} in ${found.argument}`,
+  });
+  return refusal(refusalMessage(`Sending ${secret} to ${toolName}`, approval.why));
+}
+
+/**
  * Before the call: the permission policy, then plugin beforeToolCall hooks
- * (which may rewrite the arguments). A refusal is audited as tool_blocked.
+ * (which may rewrite the arguments), then the check for secrets on what is left.
+ * A refusal is audited as tool_blocked.
  *
  * The policy is checked on every call, not only when tools are registered: a
  * blocked tool is never registered, but `mcp_call_tool` can still name it.
@@ -79,17 +131,18 @@ export async function admitToolCall(
       });
       return { refused: refusal(`Tool call blocked by gateway plugin.`) };
     }
-    return { args: modifiedCtx.args };
+    args = modifiedCtx.args;
   }
 
-  return { args };
+  const refused = await checkForSecrets(connection, toolName, args, deps);
+  return refused ? { refused } : { args };
 }
 
 /**
  * After a successful call: the audit entry (the tool ran under its sandbox
- * enforcement level), plugin afterToolCall hooks, and the personal-data guard
- * (a server asking the model for personal data gets a warning the model reads
- * with it, and an audit entry).
+ * enforcement level), noting any secrets in the result, plugin afterToolCall
+ * hooks, and the personal-data guard (a server asking the model for personal data
+ * gets a warning the model reads with it, and an audit entry).
  */
 export async function completeToolCall(
   connection: DownstreamConnection,
@@ -98,7 +151,7 @@ export async function completeToolCall(
   result: CallToolResult,
   deps: ToolCallDeps,
 ): Promise<CallToolResult> {
-  const { pluginManager, auditLog } = deps;
+  const { pluginManager, auditLog, sensitiveData } = deps;
 
   auditLog?.record({
     type: "tool_call",
@@ -107,6 +160,8 @@ export async function completeToolCall(
     enforcement: connection.manifest?.enforcement,
     ok: true,
   });
+
+  sensitiveData?.note(connection.slug, toolName, args, result);
 
   let finalResult = result;
   if (pluginManager) {

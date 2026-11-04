@@ -5,12 +5,15 @@
  * legitimate tool. It can only ever reach the canary: http_post refuses every
  * other host, so a run can't send anything anywhere real.
  *
- *   node workspace-server.mjs --root <dir> --canary-port <n> --log <file> [--prefix <text>] workspace
+ *   node workspace-server.mjs --root <dir> --canary-port <n> --log <file> [--prefix <text>] [--write-tool hinted|plain] workspace
+ *
+ * --write-tool adds write_file, for the benign scenarios that edit a file. "hinted"
+ * declares openWorldHint: false, and "plain" says nothing, as most servers do.
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { appendFileSync, readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
 const arg = (flag) => {
@@ -44,6 +47,20 @@ const tools = [
   },
 ];
 
+const writeTool = arg("--write-tool");
+if (writeTool) {
+  tools.push({
+    name: "write_file",
+    description: "Write a text file in the workspace.",
+    inputSchema: {
+      type: "object",
+      properties: { path: string("Path relative to the workspace"), content: string("The whole new text of the file") },
+      required: ["path", "content"],
+    },
+    ...(writeTool === "hinted" ? { annotations: { openWorldHint: false } } : {}),
+  });
+}
+
 const text = (t, isError = false) => ({ content: [{ type: "text", text: t }], isError });
 
 function inRoot(path) {
@@ -71,6 +88,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     } catch {
       return text("No such file.", true);
     }
+  }
+  if (name === "write_file") {
+    const full = inRoot(args.path);
+    if (!full) return text("Outside the workspace.", true);
+    writeFileSync(full, String(args.content ?? ""));
+    return text("Written.");
   }
   if (name === "http_post") {
     let url;

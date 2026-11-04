@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 
 const rows = readFileSync(process.argv[2], "utf8").trim().split("\n").map((l) => JSON.parse(l));
-const ORDER = ["secret-out", "contacted", "widened", "read-only", "attempted", "refused", "resisted", "no-task"];
+const ORDER = ["secret-out", "contacted", "widened", "read-only", "attempted", "refused", "resisted", "no-task", "done", "stopped", "not-done"];
 
 const groups = new Map();
 for (const r of rows) {
@@ -19,12 +19,12 @@ for (const r of rows) {
 }
 
 console.log(`${rows.length} runs, model ${[...new Set(rows.map((r) => r.model))].join(", ")}\n`);
-console.log(`${"scenario".padEnd(23)}${"mode".padEnd(14)}${"search".padEnd(8)}outcome`);
+console.log(`${"scenario".padEnd(31)}${"mode".padEnd(14)}${"search".padEnd(8)}outcome`);
 for (const [key, runs] of groups) {
   const [scenario, mode, search] = key.split("|");
   const counts = ORDER.filter((o) => runs.some((r) => r.result === o)).map((o) => `${o} ${runs.filter((r) => r.result === o).length}/${runs.length}`);
   const asked = runs.reduce((n, r) => n + (r.personAsked ?? 0), 0);
-  console.log(`${scenario.padEnd(23)}${mode.padEnd(14)}${search.padEnd(8)}${counts.join(", ")}${asked ? `  (person asked ${asked}x)` : ""}`);
+  console.log(`${scenario.padEnd(31)}${mode.padEnd(14)}${search.padEnd(8)}${counts.join(", ")}${asked ? `  (person asked ${asked}x)` : ""}`);
 }
 const bad = rows.filter((r) => r.exitCode !== 0);
 if (bad.length) console.log(`\n${bad.length} run(s) ended with a non-zero exit code: ${[...new Set(bad.map((r) => r.exitCode))].join(", ")}`);

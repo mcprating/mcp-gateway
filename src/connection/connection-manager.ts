@@ -50,6 +50,7 @@ import {
 } from "../utils/errors.js";
 import { getTrustPolicy } from "../permissions/trust-tiers.js";
 import { HumanGate, launcherEnvNames, refusalMessage } from "../permissions/human-gate.js";
+import { SensitiveData } from "../proxy/sensitive-data.js";
 import { trustLines, type TrustFacts } from "../registry/trust-facts.js";
 import { log } from "../utils/logger.js";
 import { loadProfiles, addProfile, removeProfile } from "../config/profiles.js";
@@ -89,6 +90,8 @@ export class ConnectionManager {
   auditLog?: AuditLog;
   /** Puts what must not rest on the model's word to the person. */
   readonly humanGate: HumanGate;
+  /** Secrets the model has read this session. Absent when the gate is off. */
+  private readonly sensitiveData?: SensitiveData;
 
   constructor(
     private readonly mcpServer: McpServer,
@@ -98,9 +101,10 @@ export class ConnectionManager {
     private readonly adTracker?: AdTracker | null,
   ) {
     this.humanGate = new HumanGate(mcpServer.server, config.humanApproval !== false, () => this.auditLog);
+    this.sensitiveData = config.humanApproval !== false ? new SensitiveData() : undefined;
   }
 
-  /** What a tool call outside the proxied tools (mcp_call_tool) goes through. */
+  /** What every downstream tool call goes through, proxied or by mcp_call_tool. */
   get toolCallDeps(): ToolCallDeps {
     return {
       proxyTimeoutMs: this.config.proxyTimeoutMs,
@@ -109,6 +113,8 @@ export class ConnectionManager {
       usageTracker: this.usageTracker,
       pluginManager: this.pluginManager,
       auditLog: this.auditLog,
+      humanGate: this.humanGate,
+      sensitiveData: this.sensitiveData,
     };
   }
 
@@ -621,12 +627,7 @@ export class ConnectionManager {
         this.mcpServer,
         connection,
         result.tools,
-        this.config.proxyTimeoutMs,
-        this.permissionManager,
-        this.adTracker,
-        this.usageTracker,
-        this.pluginManager,
-        this.auditLog,
+        this.toolCallDeps,
       );
 
       // Register proxied resources on the gateway
@@ -1047,12 +1048,7 @@ export class ConnectionManager {
         this.mcpServer,
         connection,
         result.tools,
-        this.config.proxyTimeoutMs,
-        this.permissionManager,
-        this.adTracker,
-        this.usageTracker,
-        this.pluginManager,
-        this.auditLog,
+        this.toolCallDeps,
       );
 
       // Re-register resources
@@ -1180,12 +1176,7 @@ export class ConnectionManager {
       this.mcpServer,
       connection,
       newTools,
-      this.config.proxyTimeoutMs,
-      this.permissionManager,
-      this.adTracker,
-      this.usageTracker,
-      this.pluginManager,
-      this.auditLog,
+      this.toolCallDeps,
     );
 
     // Re-sync resources
