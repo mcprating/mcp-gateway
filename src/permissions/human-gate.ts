@@ -25,9 +25,10 @@ export type Approval =
   | { approved: true; by: "person" | "setting" | "agent" }
   /**
    * "declined": they said no or dismissed it. "asked-before": they already had, so they
-   * weren't asked again. "no-answer": it failed or timed out. "no-prompt": this client can't ask.
+   * weren't asked again. "stopped-asking": they've refused enough this session that nothing
+   * more goes to them. "no-answer": it failed or timed out. "no-prompt": this client can't ask.
    */
-  | { approved: false; why: "declined" | "asked-before" | "no-answer" | "no-prompt" };
+  | { approved: false; why: "declined" | "asked-before" | "stopped-asking" | "no-answer" | "no-prompt" };
 
 export interface ApprovalRequest {
   /** The server concerned, for the audit trail. */
@@ -42,6 +43,13 @@ export interface ApprovalRequest {
 
 /** How long a person gets to answer. The SDK's default of 60 seconds is too short to read a command. */
 const ANSWER_TIMEOUT_MS = 5 * 60_000;
+/**
+ * After this many different requests refused in a session, stop asking at all.
+ * Remembering a no only covers the same request, and changing one argument makes
+ * a new one. An agent that has been told no this often isn't asking for the
+ * person's sake.
+ */
+export const MAX_REFUSALS = 3;
 /** A longer summary is cut, saying so: a client's dialog is no place for a page of text. */
 const MAX_SUMMARY = 1_500;
 
@@ -77,6 +85,11 @@ export class HumanGate {
     return this.enabled;
   }
 
+  /** Whether the person has refused enough that nothing more goes to them this session. */
+  get hasStoppedAsking(): boolean {
+    return this.declined.size >= MAX_REFUSALS;
+  }
+
   /** Whether a question put now would reach the person. */
   get canAsk(): boolean {
     return this.enabled && Boolean(this.server?.getClientCapabilities?.()?.elicitation);
@@ -93,6 +106,11 @@ export class HumanGate {
     if (this.declined.has(request.key)) {
       this.record(request.slug, false, "declined earlier in this session, so not asked again");
       return { approved: false, why: "asked-before" };
+    }
+    // A refusal, not a fall back to the model's word: this is the client that can ask.
+    if (this.hasStoppedAsking) {
+      this.record(request.slug, false, `stopped asking after ${MAX_REFUSALS} refusals in this session`);
+      return { approved: false, why: "stopped-asking" };
     }
 
     const message = plain(request.summary);
@@ -138,6 +156,8 @@ export function refusalMessage(what: string, why: Exclude<Approval, { approved: 
       return `${what} was declined by the person using this client. Don't try again unless they ask you to.`;
     case "asked-before":
       return `${what} was already declined in this session, so the person wasn't asked again. Don't try again. If they've changed their mind, they can restart their MCP client and ask you then.`;
+    case "stopped-asking":
+      return `${what} wasn't put to the person: they've declined ${MAX_REFUSALS} requests in this session, so the gateway has stopped asking. Don't try again. Tell them so. If they didn't expect those requests, something in a connected server's descriptions or results may be behind them. Restarting their MCP client lets the gateway ask again.`;
     case "no-answer":
       return `${what} needs a person's approval, and the request got no answer. Don't try again unless they ask you to.`;
     case "no-prompt":

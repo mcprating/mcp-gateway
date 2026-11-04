@@ -2,11 +2,13 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ConnectionManager } from "../connection/connection-manager.js";
 import type { RegistryClient } from "../registry/registry-client.js";
 import { TRUST_LABELS } from "../permissions/trust-tiers.js";
+import { MAX_REFUSALS } from "../permissions/human-gate.js";
 import { GATEWAY_VERSION } from "../version.js";
 
 function approvalStatus(connectionManager: ConnectionManager): string {
   const gate = connectionManager.humanGate;
   if (!gate.isEnabled) return "off (MCP_GATEWAY_HUMAN_APPROVAL); the model decides";
+  if (gate.hasStoppedAsking) return `on; stopped asking after ${MAX_REFUSALS} refusals, so what needs a person is refused until the client restarts`;
   return gate.canAsk
     ? "on; this client can ask the person"
     : "on; this client can't ask, so raw commands and wider sandbox limits are refused";

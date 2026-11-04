@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { HumanGate, launcherEnvNames, plain, refusalMessage } from "./human-gate.js";
+import { HumanGate, MAX_REFUSALS, launcherEnvNames, plain, refusalMessage } from "./human-gate.js";
 import { AuditLog } from "../audit/audit-log.js";
 
 type Elicit = (params: { message: string; requestedSchema: unknown }) => Promise<unknown>;
@@ -147,6 +147,91 @@ describe("a no, remembered", () => {
   });
 });
 
+describe("the refusal cap", () => {
+  const no = async () => ({ action: "decline" });
+  const refuseThree = async (g: HumanGate) => {
+    for (const key of ["one", "two", "three"]) await g.check({ ...REQUEST, key });
+  };
+
+  it("is three", () => {
+    expect(MAX_REFUSALS).toBe(3);
+  });
+
+  it("stops asking after three different requests are refused, however the next is worded", async () => {
+    const server = client(no);
+    const { gate: g, audit } = gate(server);
+    await refuseThree(g);
+    expect(g.hasStoppedAsking).toBe(true);
+    expect(await g.check({ ...REQUEST, key: "four" })).toEqual({ approved: false, why: "stopped-asking" });
+    expect(server.elicitInput).toHaveBeenCalledTimes(3);
+    expect(audit.query({ type: "approval" })[0].reason).toMatch(/stopped asking after 3 refusals/);
+  });
+
+  it("still asks up to the third", async () => {
+    const server = client(no);
+    const { gate: g } = gate(server);
+    await g.check({ ...REQUEST, key: "one" });
+    await g.check({ ...REQUEST, key: "two" });
+    expect(g.hasStoppedAsking).toBe(false);
+    expect(await g.check({ ...REQUEST, key: "three" })).toEqual({ approved: false, why: "declined" });
+    expect(server.elicitInput).toHaveBeenCalledTimes(3);
+  });
+
+  it("doesn't fall back to the model for what would not otherwise need a person", async () => {
+    const { gate: g } = gate(client(no));
+    await refuseThree(g);
+    expect(await g.check({ ...REQUEST, key: "four", required: false })).toEqual({ approved: false, why: "stopped-asking" });
+  });
+
+  it("keeps saying a repeat was already declined", async () => {
+    const { gate: g } = gate(client(no));
+    await refuseThree(g);
+    expect(await g.check({ ...REQUEST, key: "two" })).toEqual({ approved: false, why: "asked-before" });
+  });
+
+  it("counts a request once, however often it's retried", async () => {
+    const server = client(no);
+    const { gate: g } = gate(server);
+    for (let i = 0; i < 5; i++) await g.check(REQUEST);
+    expect(g.hasStoppedAsking).toBe(false);
+    await g.check({ ...REQUEST, key: "other" });
+    expect(server.elicitInput).toHaveBeenCalledTimes(2);
+  });
+
+  it("doesn't count a yes or a timeout", async () => {
+    const answers = [
+      { action: "accept", content: { approve: true } },
+      new Error("timed out"),
+      { action: "accept", content: { approve: true } },
+      new Error("timed out"),
+    ];
+    const server = client(async () => {
+      const next = answers.shift();
+      if (next instanceof Error) throw next;
+      return next;
+    });
+    const { gate: g } = gate(server);
+    for (const key of ["a", "b", "c", "d"]) await g.check({ ...REQUEST, key });
+    expect(g.hasStoppedAsking).toBe(false);
+    expect(server.elicitInput).toHaveBeenCalledTimes(4);
+  });
+
+  it("ends with the session", async () => {
+    const server = client(no);
+    await refuseThree(gate(server).gate);
+    expect(gate(server).gate.hasStoppedAsking).toBe(false);
+  });
+
+  it("has nothing to stop where the gate is off or the client can't ask", async () => {
+    const server = client();
+    const { gate: g } = gate(server);
+    for (const key of ["one", "two", "three", "four"]) {
+      expect(await g.check({ ...REQUEST, key })).toEqual({ approved: false, why: "no-prompt" });
+    }
+    expect(g.hasStoppedAsking).toBe(false);
+  });
+});
+
 describe("plain", () => {
   it("keeps line breaks and removes what would display as something else", () => {
     const rlo = String.fromCodePoint(0x202e);
@@ -174,6 +259,7 @@ describe("refusalMessage", () => {
   it("tells the model not to retry a no, and how the user lifts the gate where the client can't ask", () => {
     expect(refusalMessage("Starting x", "declined")).toMatch(/Don't try again unless they ask/);
     expect(refusalMessage("Starting x", "asked-before")).toMatch(/wasn't asked again.*restart their MCP client/);
+    expect(refusalMessage("Starting x", "stopped-asking")).toMatch(/declined 3 requests.*stopped asking.*Restarting their MCP client/);
     expect(refusalMessage("Starting x", "no-prompt")).toMatch(/MCP_GATEWAY_HUMAN_APPROVAL=off/);
   });
 });

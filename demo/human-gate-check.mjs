@@ -99,6 +99,12 @@ const NO = { action: "decline" };
   check("asking again doesn't reach the person", retry.error && !s.started() && s.asked.length === 1 && /already declined/.test(retry.text), retry.text.slice(0, 70));
   await s.call("mcp_connect", { ...s.launch, args: [...s.launch.args, "--other"] });
   check("a different request still does", s.asked.length === 2);
+  await s.call("mcp_connect", { ...s.launch, args: [...s.launch.args, "--third"] });
+  const fourth = await s.call("mcp_connect", { ...s.launch, args: [...s.launch.args, "--fourth"], confirmed: true });
+  const widen = await s.call("mcp_sandbox", { action: "set", slug: "some-server", envAllow: ["AWS_SECRET_ACCESS_KEY"] });
+  check("after three refusals nothing more reaches the person", fourth.error && widen.error && s.asked.length === 3 && /stopped asking/.test(fourth.text), `${s.asked.length} question(s)`);
+  const health = await s.call("mcp_gateway_health", {});
+  check("health says it stopped asking", /stopped asking after 3 refusals/.test(health.text));
   await s.close();
 }
 {
