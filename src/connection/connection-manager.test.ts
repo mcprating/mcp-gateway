@@ -507,6 +507,28 @@ describe("the human gate at connect", () => {
     expect(createTransport).not.toHaveBeenCalled();
   });
 
+  it("stops asking after three refusals, and starts nothing on the model's word after that", async () => {
+    const { cm, elicitInput } = gated(unverified, { action: "decline" });
+    for (const file of ["a.js", "b.js", "c.js"]) {
+      await expect(cm.connect({ command: "node", args: [file] })).rejects.toThrow(/declined by the person/);
+    }
+    await expect(cm.connect({ command: "node", args: ["d.js"], confirmed: true })).rejects.toThrow(/has stopped asking/);
+    await expect(cm.connect({ slug: "evil-pkg", confirmed: true })).rejects.toThrow(/has stopped asking/);
+    expect(await cm.approveSavedLaunch('group "g"', { slug: "x" })).toMatch(/has stopped asking/);
+    expect(elicitInput).toHaveBeenCalledTimes(3);
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it("still starts what was saved once it has stopped asking", async () => {
+    const { cm } = gated(unverified, { action: "decline" });
+    for (const file of ["a.js", "b.js", "c.js"]) {
+      await expect(cm.connect({ command: "node", args: [file] })).rejects.toThrow(/declined/);
+    }
+    const summary = await cm.connect({ command: "node", args: ["saved.js"], stored: true });
+    expect(createTransport).toHaveBeenCalledOnce();
+    await cm.disconnect((summary as { slug: string }).slug, { removeProfile: false });
+  });
+
   it("tells a saved launch from a live one: declining one doesn't answer the other", async () => {
     const { cm, elicitInput } = gated(unverified, { action: "decline" });
     const entry = { command: "node", args: ["evil.js"] };

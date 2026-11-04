@@ -511,9 +511,13 @@ counts: a decline, a dismissal, a timeout after five minutes or an empty accept 
 Every outcome is in `mcp_audit`, as `approval`.
 
 After a no, the gateway won't put that same request to you again until your client
-restarts, so an agent can't keep raising the dialog until it gets a yes. A timeout stops
-the request but isn't remembered, since you may not have seen it, and a yes covers one
-request, once. A request that differs at all, even by one argument, is a new question.
+restarts, so an agent can't keep raising the dialog until it gets a yes. Changing one
+argument makes a new question, so after three refusals in a session it stops asking
+altogether: everything that needs you is refused until the client restarts, and
+`mcp_gateway_health` says so. If you didn't expect those requests, check what's connected
+before you restart. A timeout stops the request but doesn't count, since you may not have
+seen it, and a yes covers one request, once. Saved launches still start: they were
+approved when they were saved.
 
 **If your client can't ask** (it doesn't support elicitation), a raw command and a
 wider sandbox are refused, and the refusal tells the model how you can change that. A
