@@ -157,8 +157,16 @@ export interface ConnectParams {
   args?: string[];
   /** Additional environment variables */
   env?: Record<string, string>;
-  /** User has explicitly confirmed connection (required for community/unknown tier) */
+  /**
+   * The model says the user confirmed this (community/unknown tier). Only a
+   * model's word: where the client can ask, the person is asked instead.
+   */
   confirmed?: boolean;
+  /**
+   * A launch read back from a saved profile or group, approved when it was
+   * saved. Set by the gateway only: no tool's input reaches this field.
+   */
+  stored?: boolean;
   /** Save this connection as an auto-connect profile */
   saveProfile?: boolean;
   /** Transport type — defaults to "stdio" */

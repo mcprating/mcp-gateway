@@ -81,6 +81,7 @@ async function act2Gateway() {
     registryCacheTtlMs: 60_000, reconnectMaxAttempts: 1,
     reconnectBaseDelayMs: 500, healthCheckIntervalMs: 60_000,
     enableAutoInstall: false, enableUsageTracking: false, enableAutoRecommend: false,
+    humanApproval: false, // a script, with no person to ask
   });
   const cm = ctx.connectionManager;
 

@@ -162,9 +162,10 @@ mcp_call_tool({
 ### About `confirmed: true`
 For untrusted or low-score servers the Gateway **refuses the first attempt** and returns a
 warning (unknown provenance, or missing required env vars). Re-issue the same call with
-`confirmed: true` to proceed. In Cursor you'll simply see the agent report the warning —
-tell it "yes, connect anyway" and it will retry with the flag. That's a deliberate
-speed-bump before running third-party code.
+`confirmed: true` to proceed. In a client that supports MCP elicitation the gateway asks
+you directly instead, and the flag has no effect. Otherwise you'll see the agent report the
+warning — tell it "yes, connect anyway" and it will retry with the flag. That's a speed-bump
+before running third-party code, not a guarantee: the model sets that flag itself.
 
 ---
 

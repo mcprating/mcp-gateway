@@ -153,5 +153,6 @@ export function groupToConnectParams(group: ServerGroup): ConnectParams[] {
     transportType: s.transportType,
     url: s.url,
     confirmed: true,
+    stored: true,
   }));
 }

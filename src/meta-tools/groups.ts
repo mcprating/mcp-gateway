@@ -129,6 +129,9 @@ export function registerGroups(
               return toolError("Either 'slug', 'command', or 'url' is required to add a server.");
             }
 
+            const refused = await connectionManager.approveSavedLaunch(`group "${name}"`, { slug, command, args, url });
+            if (refused) return toolError(refused);
+
             addToGroup(groupsPath, name, {
               slug,
               command,

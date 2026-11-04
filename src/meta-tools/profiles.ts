@@ -128,6 +128,9 @@ export function registerProfiles(
               return toolError("Either 'slug', 'command', or 'url' is required to add a server.");
             }
 
+            const refused = await connectionManager.approveSavedLaunch(`profile "${name}"`, { slug, command, args, url });
+            if (refused) return toolError(refused);
+
             addToNamedProfile(profilesPath, name, {
               slug,
               command,
@@ -178,7 +181,7 @@ export function registerProfiles(
 
             for (const profile of connections) {
               try {
-                await connectionManager.connect({ ...profile, confirmed: true });
+                await connectionManager.connect({ ...profile, confirmed: true, stored: true });
                 results.push(`✅ ${profile.slug || profile.command || profile.url}`);
               } catch (err) {
                 results.push(

@@ -4,6 +4,14 @@ import type { RegistryClient } from "../registry/registry-client.js";
 import { TRUST_LABELS } from "../permissions/trust-tiers.js";
 import { GATEWAY_VERSION } from "../version.js";
 
+function approvalStatus(connectionManager: ConnectionManager): string {
+  const gate = connectionManager.humanGate;
+  if (!gate.isEnabled) return "off (MCP_GATEWAY_HUMAN_APPROVAL); the model decides";
+  return gate.canAsk
+    ? "on; this client can ask the person"
+    : "on; this client can't ask, so raw commands and wider sandbox limits are refused";
+}
+
 export function registerHealth(
   server: McpServer,
   connectionManager: ConnectionManager,
@@ -24,6 +32,7 @@ export function registerHealth(
         `**Version:** ${GATEWAY_VERSION}`,
         `**Uptime:** ${formatDuration(uptimeMs)}`,
         `**Connections:** ${connections.length}`,
+        `**Human approval:** ${approvalStatus(connectionManager)}`,
         "",
       ];
 

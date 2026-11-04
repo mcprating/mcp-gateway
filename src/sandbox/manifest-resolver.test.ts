@@ -11,6 +11,7 @@ import {
   withConnectEnv,
   type ContainmentRemedy,
   type ManifestChanges,
+  describeLoosening,
 } from "./manifest-resolver.js";
 import type { RegistryServer, TrustTier } from "../registry/types.js";
 import type { CapabilityManifest } from "./types.js";
@@ -390,5 +391,49 @@ describe("overrideSlug", () => {
         error: expect.stringContaining("No registry answered"),
       });
     }
+  });
+});
+
+describe("describeLoosening", () => {
+  const base = manifest({
+    enforcement: "l2-container",
+    env: { allow: ["A"], inheritDefaults: true },
+    network: { mode: "allowlist", allow: ["a.example"] },
+    filesystem: { read: ["/r"], write: ["/w"] },
+    subprocess: false,
+  });
+
+  it("finds nothing when nothing widens, including when things tighten", () => {
+    expect(describeLoosening(base, base)).toEqual([]);
+    expect(
+      describeLoosening(base, {
+        ...base,
+        env: { allow: [], inheritDefaults: true },
+        network: { mode: "none", allow: [] },
+        filesystem: { read: [], write: [] },
+      }),
+    ).toEqual([]);
+  });
+
+  it("names each thing that widens", () => {
+    const lines = describeLoosening(base, {
+      ...base,
+      enforcement: "l1-process",
+      env: { allow: ["A", "SECRET"], inheritDefaults: true },
+      network: { mode: "all", allow: [] },
+      filesystem: { read: ["/r", "/home"], write: ["/w", "/tmp"] },
+      subprocess: true,
+    });
+    expect(lines).toHaveLength(6);
+    expect(lines.join(" ")).toMatch(/l2-container to l1-process.*SECRET.*allowlist to all.*\/home.*\/tmp.*other programs/);
+  });
+
+  it("counts a new host on an allowlist, and an allowlist that replaces no network", () => {
+    expect(describeLoosening(base, { ...base, network: { mode: "allowlist", allow: ["a.example", "b.example"] } })).toEqual([
+      "It may reach these hosts: b.example.",
+    ]);
+    expect(
+      describeLoosening({ ...base, network: { mode: "none", allow: [] } }, { ...base, network: { mode: "allowlist", allow: ["b.example"] } }),
+    ).toEqual(["Network goes from none to allowlist (b.example)."]);
   });
 });

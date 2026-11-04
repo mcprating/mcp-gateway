@@ -190,11 +190,13 @@ matter more here than in local mode.
 3. **Full round trip.** This exercises spawn + proxy + teardown without needing any
    credentials:
    ```
-   mcp_connect({command: "npx", args: ["-y", "@modelcontextprotocol/server-everything"], confirmed: true})
+   mcp_connect({command: "npx", args: ["-y", "@modelcontextprotocol/server-everything"]})
    mcp_call_tool({name: "<slug>__echo", arguments: {message: "hello"}})
    mcp_disconnect({slug: "<slug>"})
    ```
-   Expect `Echo: hello`. (The tool is `get-sum`, not `add`, on that server.)
+   Expect `Echo: hello`. (The tool is `get-sum`, not `add`, on that server.) A raw command
+   needs your approval: your client asks, or, if it can't, the connect is refused and says
+   how to allow it.
 4. **Diagnostics.** `mcp_gateway_health` reports version, uptime, registry status and
    per-connection health.
 

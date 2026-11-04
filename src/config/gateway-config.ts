@@ -62,6 +62,8 @@ export function loadConfig(): GatewayConfig {
 
     minQualityScore: parseMinScore(process.env.MCP_GATEWAY_MIN_SCORE ?? fileConfig.minQualityScore),
 
+    humanApproval: parseHumanApproval(process.env.MCP_GATEWAY_HUMAN_APPROVAL) ?? fileConfig.humanApproval,
+
     proxyTimeoutMs: parseIntEnv("MCP_GATEWAY_TIMEOUT") ??
       fileConfig.proxyTimeoutMs ??
       DEFAULTS.proxyTimeoutMs,
@@ -196,6 +198,12 @@ function parseCsvEnv(name: string): string[] | undefined {
     .map((s) => s.trim())
     .filter(Boolean);
   return items.length > 0 ? items : undefined;
+}
+
+/** MCP_GATEWAY_HUMAN_APPROVAL: "off" or "false" turns the gate off. Anything else leaves it on. */
+function parseHumanApproval(value: string | undefined): boolean | undefined {
+  if (value === undefined || value === "") return undefined;
+  return !["off", "false"].includes(value.trim().toLowerCase());
 }
 
 /**

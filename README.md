@@ -263,12 +263,14 @@ the endpoint). A known package started by command is judged as itself, not as
 - MCP Rating's own start test: started, didn't start, needs credentials, or not tested;
 - last release and last code push, with where each date comes from.
 
-It stops and returns a warning for a [Community] or [Unverified] server, and,
-whatever the tier, when the safety score is in the risk band, MCP Rating has delisted the
+It stops for a [Community] or [Unverified] server, and, whatever the tier, when
+the safety score is in the risk band, MCP Rating has delisted the
 package, or a registry name points at a different package than MCP Rating knows
-by that name. The warning goes to the agent, and `confirmed: true` on the retry is
-a field the model fills in. So this protects you as far as the model passes the
-warning on and your client asks before a tool call, and no further.
+by that name. Where your client supports MCP elicitation, the gateway asks you
+directly, in a dialog the model can't see or answer (see
+[What needs a person](#what-needs-a-person)). Elsewhere the warning goes to the
+agent, and `confirmed: true` on the retry is a field the model fills in, so it
+protects you only as far as the model passes it on.
 
 ### A minimum score
 
@@ -319,11 +321,11 @@ MCP Rating's mirror of it.
   same npm or PyPI package, Docker image or hosted endpoint — in one request per
   search. It is matched by package, never by name: any registry can give any
   package a well-known name. Otherwise the server shows as *unrated* and
-  [Unverified], so connecting it returns a warning first. Numbers another
+  [Unverified], so connecting it stops first. Numbers another
   registry puts in its own entries (`_meta`) are not read: anyone can write them.
 - **Warnings that stop a connect.** If MCP Rating knows a server's registry name
   as a different package, or has delisted the package, `mcp_discover` says so,
-  lists it last, and `mcp_connect` returns a warning whatever its trust tier.
+  lists it last, and `mcp_connect` stops whatever its trust tier.
 - **The partner key goes to MCP Rating only**, never to another registry.
 
 The official registry's search matches server names only and was slow when this
@@ -355,6 +357,7 @@ The gateway reads config from `~/.mcp-gateway/config.json`:
 | `MCP_GATEWAY_LOG_LEVEL` | Log level (debug/info/warn/error) | `info` |
 | `MCP_GATEWAY_CONTAINER_ISOLATION` | Force L2 container isolation on/off | manifest decides |
 | `MCP_GATEWAY_AUDIT_LOG` | Path for the forensic audit log | disabled |
+| `MCP_GATEWAY_HUMAN_APPROVAL` | `off` lets the model decide what otherwise needs a person (see [What needs a person](#what-needs-a-person)) | on |
 | `MCP_GATEWAY_PARTNER_KEY` | Partner attribution key — **enables ad telemetry** | unset |
 | `MCP_GATEWAY_AD_TRACKING` | Set to `false` to disable ad telemetry outright | unset |
 | `MCP_GATEWAY_HTTP_TOKEN` | Bearer token for HTTP daemon mode | unset |
@@ -428,7 +431,8 @@ Put the key in the gateway's `env` in your client config, not in the chat:
 
 A server receives it only if its registry entry declares that variable. For one
 that doesn't, allowlist the **name**, never the value:
-`mcp_sandbox({action: "set", slug: "…", envAllow: ["GITHUB_TOKEN"]})`.
+`mcp_sandbox({action: "set", slug: "…", envAllow: ["GITHUB_TOKEN"]})`. That widens
+what the server gets, so the gateway asks you first.
 
 `mcp_connect` also accepts `env: { NAME: "value" }`. That works, but the model has
 to write the secret into a tool call, which puts it in your chat transcript and
@@ -478,16 +482,49 @@ The gateway passes descriptions and results on as the server wrote them, with a
 trust label in front of each description. It doesn't scan them, and when a server
 changes its tool list it forwards the new one without comparing it to the old.
 
-The model can reach the gateway's own controls too. `mcp_connect` can start a
-command, and `mcp_sandbox` can widen a server's limits, including which of your
-environment variables it receives. So what a poisoned description can ask for
-includes undoing L1 for one server. Until that changes:
+What helps:
 
 - Connect only what you need.
-- Keep your client's approval prompt on for tool calls, `mcp_connect` and
-  `mcp_sandbox` above all.
+- Keep your client's approval prompt on for tool calls.
 - Which model you run matters: in that measurement it mattered far more than which
   framework.
+
+### What needs a person
+
+A poisoned description can tell the model to use the gateway's own tools. So these
+don't rest on the model's word. The gateway asks you itself, through
+[MCP elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation):
+your client shows the question, and the model never sees or answers it.
+
+- **Starting a raw command** with `mcp_connect({command: …})`, whatever it names.
+- **Setting environment variables that change what runs** on a connect, such as
+  `NODE_OPTIONS` or `LD_PRELOAD`.
+- **Widening a server's sandbox** with `mcp_sandbox`: more environment variables,
+  more network, more paths, weaker isolation, or a `reset` that lands somewhere wider.
+  Tightening never asks.
+- **Adding a server to a profile or group**, which then starts without asking again.
+- **Connecting a [Community] or [Unverified] server by slug**, and anything else that
+  would have waited on `confirmed: true`, where your client can ask.
+
+The question shows exactly what would run or change. Only a yes with the box ticked
+counts: a decline, a dismissal, a timeout after five minutes or an empty accept is a no.
+Every outcome is in `mcp_audit`, as `approval`.
+
+After a no, the gateway won't put that same request to you again until your client
+restarts, so an agent can't keep raising the dialog until it gets a yes. A timeout stops
+the request but isn't remembered, since you may not have seen it, and a yes covers one
+request, once. A request that differs at all, even by one argument, is a new question.
+
+**If your client can't ask** (it doesn't support elicitation), a raw command and a
+wider sandbox are refused, and the refusal tells the model how you can change that. A
+server by slug falls back to the warning and `confirmed: true`. To go back to letting
+the model decide everything, set `MCP_GATEWAY_HUMAN_APPROVAL=off` in the gateway's
+`env` in your client config. No tool can change that setting, though a model with a
+file-editing tool could still edit your client config: this gate covers the gateway's
+tools, not the rest of your agent. `mcp_gateway_health` says which mode you're in.
+
+Claude Code 2.1.317 and Kiro both declare elicitation. A launch saved to a profile or
+group was approved when it was saved, so it starts without asking.
 
 ### What is not covered
 

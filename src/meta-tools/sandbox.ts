@@ -5,6 +5,7 @@ import { RegistryClient } from "../registry/registry-client.js";
 import {
   ManifestResolver,
   containmentRemedy,
+  describeLoosening,
   isRegistryName,
   overrideForSet,
   overrideSlug,
@@ -13,6 +14,7 @@ import {
   type TrustLookup,
 } from "../sandbox/manifest-resolver.js";
 import type { CapabilityManifest } from "../sandbox/types.js";
+import { refusalMessage } from "../permissions/human-gate.js";
 import { toolError } from "../utils/errors.js";
 
 /**
@@ -24,6 +26,9 @@ import { toolError } from "../utils/errors.js";
  *           — the rest keep what the server would otherwise run with; takes
  *           effect on the next connection to that server
  *  - reset: clear the override, reverting to trust-tier defaults
+ *
+ * Tightening needs nothing. Widening, by set or by a reset that lands somewhere
+ * wider, goes to the person through the human gate.
  */
 export function registerSandbox(
   server: McpServer,
@@ -114,8 +119,43 @@ export function registerSandbox(
             ? ""
             : `\`${params.slug}\` is known here by its slug, \`${slug}\`, as a connect by that name is.\n\n`;
 
+        const saved = resolver.getOverride(slug);
+        const conn = connectionManager.getConnection(slug);
+        const attempt = conn ? undefined : connectionManager.lastTrust(slug);
+        const trustLookup = async (): Promise<TrustLookup> =>
+          conn
+            ? { status: "connection", trustTier: conn.trustTier, server: conn.registryServer }
+            : attempt
+              ? { status: "last-connect", trustTier: attempt.trustTier, server: attempt.registryServer }
+              : (byName ?? (await lookUpTrust(registryClient, slug)));
+        // Widening goes to the person: this tool is the model's, and the same
+        // model reads every connected server's descriptions and results.
+        const approveWidening = async (before: CapabilityManifest, after: CapabilityManifest): Promise<string | null> => {
+          const lines = describeLoosening(before, after);
+          if (lines.length === 0) return null;
+          const approval = await connectionManager.humanGate.check({
+            slug,
+            key: JSON.stringify(["widen", slug, lines]),
+            required: true,
+            summary: [
+              `An agent wants to widen what the server ${slug} may do.`,
+              "",
+              ...lines,
+              "",
+              "Say yes only if you asked for this. A tool description or result from another server can tell an agent to ask.",
+            ].join("\n"),
+          });
+          return approval.approved ? null : refusalMessage(`Widening the sandbox of "${slug}"`, approval.why);
+        };
+
         // ── RESET ──────────────────────────────────────────────────────────
         if (action === "reset") {
+          // An override can be stricter than the defaults it gives way to.
+          if (saved) {
+            const defaults = overrideForSet(slug, {}, { lookup: await trustLookup() }, resolver.containerIsolation).manifest;
+            const refused = await approveWidening(saved, defaults);
+            if (refused) return toolError(refused);
+          }
           resolver.clearOverride(slug);
           if (stale) resolver.clearOverride(params.slug);
           return text(
@@ -127,8 +167,7 @@ export function registerSandbox(
         if (action === "view") {
           // Prefer the live connection's resolved manifest, then a saved
           // override, then a note that defaults will apply on connect.
-          const conn = connectionManager.getConnection(slug);
-          const manifest = conn?.manifest ?? resolver.getOverride(slug);
+          const manifest = conn?.manifest ?? saved;
           const staleNote = stale ? `Still in the overrides file: ${staleIs}. \`reset\` removes it.` : "";
 
           if (!manifest) {
@@ -175,16 +214,7 @@ export function registerSandbox(
         // come from, and so does the latest connect attempt without one. Only
         // then ask the registry: by name if that is what was passed, since
         // another registry's server can't be found by its slug.
-        const saved = resolver.getOverride(slug);
-        const conn = connectionManager.getConnection(slug);
-        const attempt = conn ? undefined : connectionManager.lastTrust(slug);
-        const lookup: TrustLookup | undefined = saved
-          ? undefined
-          : conn
-            ? { status: "connection", trustTier: conn.trustTier, server: conn.registryServer }
-            : attempt
-              ? { status: "last-connect", trustTier: attempt.trustTier, server: attempt.registryServer }
-              : (byName ?? (await lookUpTrust(registryClient, slug)));
+        const lookup: TrustLookup | undefined = saved ? undefined : await trustLookup();
         const { manifest: updated, start } = overrideForSet(
           slug,
           {
@@ -199,6 +229,10 @@ export function registerSandbox(
           { saved, lookup },
           resolver.containerIsolation,
         );
+
+        const before = overrideForSet(slug, {}, { saved, lookup }, resolver.containerIsolation).manifest;
+        const refused = await approveWidening(before, updated);
+        if (refused) return toolError(refused);
 
         resolver.saveOverride(updated);
         // This one replaces it. It wasn't built on: it was never applied, and

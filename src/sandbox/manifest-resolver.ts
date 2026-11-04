@@ -205,6 +205,37 @@ export function overrideSlug(
   };
 }
 
+const ENFORCEMENT_RANK: Record<EnforcementLevel, number> = { none: 0, "l1-process": 1, "l2-container": 2, "l3-wasm": 3 };
+const NETWORK_RANK: Record<NetworkMode, number> = { none: 0, allowlist: 1, all: 2 };
+
+/**
+ * What `after` grants that `before` didn't, one line each, for the person to
+ * read. Empty when nothing widens. Filesystem and network count even under L1,
+ * where nothing enforces them: the override outlives the mode it was set in.
+ */
+export function describeLoosening(before: CapabilityManifest, after: CapabilityManifest): string[] {
+  const added = (from: string[], to: string[]) => to.filter((item) => !from.includes(item));
+  const lines: string[] = [];
+  if (ENFORCEMENT_RANK[after.enforcement] < ENFORCEMENT_RANK[before.enforcement]) {
+    lines.push(`Isolation goes from ${before.enforcement} to ${after.enforcement}.`);
+  }
+  const env = added(before.env.allow, after.env.allow);
+  if (env.length > 0) lines.push(`It may receive these environment variables: ${env.join(", ")}.`);
+  if (NETWORK_RANK[after.network.mode] > NETWORK_RANK[before.network.mode]) {
+    const hosts = after.network.mode === "allowlist" && after.network.allow.length > 0 ? ` (${after.network.allow.join(", ")})` : "";
+    lines.push(`Network goes from ${before.network.mode} to ${after.network.mode}${hosts}.`);
+  } else if (after.network.mode === "allowlist" && before.network.mode === "allowlist") {
+    const hosts = added(before.network.allow, after.network.allow);
+    if (hosts.length > 0) lines.push(`It may reach these hosts: ${hosts.join(", ")}.`);
+  }
+  const read = added(before.filesystem.read, after.filesystem.read);
+  if (read.length > 0) lines.push(`It may read: ${read.join(", ")}.`);
+  const write = added(before.filesystem.write, after.filesystem.write);
+  if (write.length > 0) lines.push(`It may write: ${write.join(", ")}.`);
+  if (after.subprocess && !before.subprocess) lines.push("It may start other programs.");
+  return lines;
+}
+
 /** The fields mcp_sandbox "set" changes. One left out keeps its current value. */
 export interface ManifestChanges {
   enforcement?: EnforcementLevel;
