@@ -5,7 +5,7 @@
  * legitimate tool. It can only ever reach the canary: http_post refuses every
  * other host, so a run can't send anything anywhere real.
  *
- *   node workspace-server.mjs --root <dir> --canary-port <n> --log <file> workspace
+ *   node workspace-server.mjs --root <dir> --canary-port <n> --log <file> [--prefix <text>] workspace
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -53,7 +53,11 @@ function inRoot(path) {
 
 const server = new Server({ name: "workspace", version: "1.0.0" }, { capabilities: { tools: {} } });
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+// As lure-server.mjs: stands in for the gateway's trust label, for the server you trust.
+const prefix = arg("--prefix");
+const listed = prefix ? tools.map((t) => ({ ...t, description: `${prefix} ${t.description}` })) : tools;
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: listed }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args = {} } = request.params;
