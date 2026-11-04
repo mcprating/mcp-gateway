@@ -2,16 +2,11 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { buildPassthroughSchema } from "./schema-adapter.js";
 import { TRUST_LABELS } from "../permissions/trust-tiers.js";
-import type { PermissionManager } from "../permissions/permission-manager.js";
 import type {
   DownstreamConnection,
   DownstreamTool,
 } from "../connection/types.js";
 import { log } from "../utils/logger.js";
-import type { AdTracker } from "../ads/ad-tracker.js";
-import type { UsageTracker } from "../analytics/usage-tracker.js";
-import type { PluginManager } from "../plugins/plugin-manager.js";
-import type { AuditLog } from "../audit/audit-log.js";
 import { buildProgressForwarder } from "./progress-forwarder.js";
 import { isTaskTool, registerTaskProxyTool } from "./task-proxy.js";
 import {
@@ -61,23 +56,11 @@ export function registerProxiedTools(
   mcpServer: McpServer,
   connection: DownstreamConnection,
   downstreamTools: DownstreamTool[],
-  proxyTimeoutMs: number,
-  permissionManager?: PermissionManager,
-  adTracker?: AdTracker | null,
-  usageTracker?: UsageTracker,
-  pluginManager?: PluginManager,
-  auditLog?: AuditLog,
+  deps: ToolCallDeps,
 ): Map<string, { remove: () => void }> {
   const registered = new Map<string, { remove: () => void }>();
   const trustLabel = TRUST_LABELS[connection.trustTier];
-  const deps: ToolCallDeps = {
-    proxyTimeoutMs,
-    permissionManager,
-    adTracker,
-    usageTracker,
-    pluginManager,
-    auditLog,
-  };
+  const { permissionManager } = deps;
 
   for (const tool of downstreamTools) {
     // Check tool-level permissions if a permission manager is provided

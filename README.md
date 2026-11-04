@@ -475,12 +475,14 @@ through tools you trust, so L1 and L2 don't touch it: they limit what a server's
 [A November 2026 measurement](https://arxiv.org/abs/2611.03555) ran 45 of these attacks through 12 agent
 frameworks and 18 models. In 22.9% of runs the model made a call the attacker asked
 for, from 0.4% to 49.7% depending on the model, and no framework defended against it
-on purpose. It didn't test this gateway or a client such as Claude Code or Cursor,
-and we haven't measured either yet.
+on purpose. It didn't test this gateway or a client such as Claude Code or Cursor.
+Our own scenarios and harness are in `demo/poison`.
 
 The gateway passes descriptions and results on as the server wrote them, with a
 trust label in front of each description. It doesn't scan them, and when a server
-changes its tool list it forwards the new one without comparing it to the old.
+changes its tool list it forwards the new one without comparing it to the old. What
+it does watch is a secret on its way out: see
+[What needs a person](#what-needs-a-person).
 
 What helps:
 
@@ -505,6 +507,9 @@ your client shows the question, and the model never sees or answers it.
 - **Adding a server to a profile or group**, which then starts without asking again.
 - **Connecting a [Community] or [Unverified] server by slug**, and anything else that
   would have waited on `confirmed: true`, where your client can ask.
+- **Sending a secret the model read.** When a tool call's arguments hold a value the
+  gateway saw come back from a secrets file, or anything shaped like a credential, you
+  are asked first, on any server, including the one it was read from.
 
 The question shows exactly what would run or change. Only a yes with the box ticked
 counts: a decline, a dismissal, a timeout after five minutes or an empty accept is a no.
@@ -519,8 +524,9 @@ before you restart. A timeout stops the request but doesn't count, since you may
 seen it, and a yes covers one request, once. Saved launches still start: they were
 approved when they were saved.
 
-**If your client can't ask** (it doesn't support elicitation), a raw command and a
-wider sandbox are refused, and the refusal tells the model how you can change that. A
+**If your client can't ask** (it doesn't support elicitation), a raw command, a wider
+sandbox and a secret on its way out are refused, and the refusal tells the model how
+you can change that. A
 server by slug falls back to the warning and `confirmed: true`. To go back to letting
 the model decide everything, set `MCP_GATEWAY_HUMAN_APPROVAL=off` in the gateway's
 `env` in your client config. No tool can change that setting, though a model with a
@@ -529,6 +535,35 @@ tools, not the rest of your agent. `mcp_gateway_health` says which mode you're i
 
 Claude Code 2.1.317 and Kiro both declare elicitation. A launch saved to a profile or
 group was approved when it was saved, so it starts without asking.
+
+#### What counts as a secret
+
+The check compares data, so it makes no difference how the request was worded. It
+counts two things:
+
+- Values in a file whose name says it holds secrets, such as `.env`, `.npmrc`,
+  `id_rsa` or anything under `.ssh` or `.aws`. Not `.env.example`, and not values
+  like `PORT=8080`.
+- Strings shaped like a credential, such as `ghp_…`, `AKIA…` or a private key, in
+  any tool's result.
+
+Session tokens and page cursors aren't secrets to it, whatever they're called: servers
+hand those out and expect them back. Having read a secret doesn't make later calls
+suspect, either. Only the value itself turning up does, with base64, hex, URL encoding
+and added spaces taken off first. The question names the file, the variable and where
+it's going, never the value.
+
+A tool on the server the value came from is asked about too, because `http_post`
+beside `read_file` is how data leaves. The exception is a tool declaring
+`openWorldHint: false`, so saving `.env` again needn't cost a question. Believing
+that risks nothing: a server lying about it already has the value, and it covers no
+other server's. Most servers don't declare it, so expect a question there.
+
+It misses a secret in a file nothing marks out, with no credential's shape. It misses
+one the model has rewritten in some other way, and part of one. It sees only what
+comes through the gateway, so it knows nothing a client's own file tools read, and it
+covers tool calls, not resources, prompts or what the model says in its reply.
+`demo/data-check.mjs` runs the attacks and these limits against a built gateway.
 
 ### What is not covered
 
