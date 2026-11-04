@@ -38,6 +38,8 @@ function setup(opts: {
   /** Other overrides in the file, by key: e.g. one saved under a registry name. */
   filed?: Record<string, CapabilityManifest>;
   getServer?: (ref: string) => Promise<unknown>;
+  /** What the human gate answers; a yes unless a test says otherwise. */
+  approval?: { approved: true; by: "person" } | { approved: false; why: "declined" | "no-answer" | "no-prompt" };
 }) {
   let handler!: Handler;
   const server = {
@@ -53,6 +55,7 @@ function setup(opts: {
     delete file[slug];
   });
   const getServer = vi.fn(opts.getServer ?? (async () => null));
+  const check = vi.fn(async (_request: { summary: string }) => opts.approval ?? { approved: true, by: "person" });
   registerSandbox(
     server as never,
     {
@@ -73,6 +76,7 @@ function setup(opts: {
             }
           : undefined,
       lastTrust: (slug: string) => (slug === at ? opts.attempt : undefined),
+      humanGate: { check },
     } as never,
     {
       getServer,
@@ -88,7 +92,7 @@ function setup(opts: {
     return { text: res.content[0].text, saved: saveOverride.mock.calls[0]?.[0] };
   };
   const view = async (slug = "srv") => (await handler({ action: "view", slug })).content[0].text;
-  return { set, view, call: handler, getServer, saveOverride, clearOverride };
+  return { set, view, call: handler, getServer, saveOverride, clearOverride, check };
 }
 
 const CONTAINED: CapabilityManifest = {
@@ -371,5 +375,74 @@ describe("mcp_sandbox with a registry name", () => {
       expect(text).toContain("`io.github.a/one`, `io.github.b/two`");
       expect(await setup({}).view("srv")).not.toContain("saved under a registry name");
     });
+  });
+});
+
+describe("mcp_sandbox and the human gate", () => {
+  const NO = { approved: false, why: "declined" } as const;
+
+  it("saves nothing that widens a server's limits when the person says no", async () => {
+    const { call, saveOverride, check } = setup({ saved: CONTAINED, approval: NO });
+    const res = await call({ action: "set", slug: "srv", envAllow: ["API_KEY", "AWS_SECRET_ACCESS_KEY"], network: "all" });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/declined by the person/);
+    expect(saveOverride).not.toHaveBeenCalled();
+    const { summary } = check.mock.calls[0][0];
+    expect(summary).toContain("AWS_SECRET_ACCESS_KEY");
+    expect(summary).toContain("Network goes from none to all");
+    expect(summary).not.toContain("API_KEY,");
+  });
+
+  it("identifies a widening by what it would change, so the same one can be recognised", async () => {
+    const { call, check } = setup({ saved: CONTAINED, approval: NO });
+    await call({ action: "set", slug: "srv", envAllow: ["API_KEY", "SECRET"] });
+    await call({ action: "set", slug: "srv", envAllow: ["API_KEY", "SECRET"] });
+    await call({ action: "set", slug: "srv", envAllow: ["API_KEY", "OTHER"] });
+    const keys = check.mock.calls.map((c) => (c[0] as unknown as { key: string }).key);
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).not.toBe(keys[0]);
+  });
+
+  it("refuses widening where the client can't ask", async () => {
+    const { call, saveOverride } = setup({ saved: CONTAINED, approval: { approved: false, why: "no-prompt" } });
+    const res = await call({ action: "set", slug: "srv", enforcement: "none" });
+    expect(res.content[0].text).toMatch(/MCP_GATEWAY_HUMAN_APPROVAL=off/);
+    expect(saveOverride).not.toHaveBeenCalled();
+  });
+
+  it("saves widening on the person's yes", async () => {
+    const { call, saveOverride } = setup({ saved: CONTAINED });
+    await call({ action: "set", slug: "srv", envAllow: ["API_KEY", "GITHUB_TOKEN"] });
+    expect(saveOverride).toHaveBeenCalledOnce();
+  });
+
+  it("asks nothing to tighten", async () => {
+    const { call, saveOverride, check } = setup({ saved: { ...CONTAINED, network: { mode: "all", allow: [] } }, approval: NO });
+    await call({ action: "set", slug: "srv", network: "none", envAllow: [] });
+    expect(check).not.toHaveBeenCalled();
+    expect(saveOverride).toHaveBeenCalledOnce();
+  });
+
+  it("asks before a reset that lands somewhere wider, and keeps the override on a no", async () => {
+    const strict = { ...CONTAINED, env: { allow: [], inheritDefaults: true } };
+    const { call, clearOverride, check } = setup({
+      saved: strict,
+      getServer: async () => ({ ...GITHUB_RECORD }),
+      approval: NO,
+    });
+    const res = await call({ action: "reset", slug: "srv" });
+    expect(res.isError).toBe(true);
+    expect(check.mock.calls[0][0].summary).toContain("GITHUB_TOKEN");
+    expect(clearOverride).not.toHaveBeenCalled();
+  });
+
+  it("resets with no question when the defaults are no wider", async () => {
+    const { call, clearOverride, check } = setup({
+      saved: { ...CONTAINED, network: { mode: "all", allow: [] }, env: { allow: ["API_KEY"], inheritDefaults: true } },
+      approval: NO,
+    });
+    await call({ action: "reset", slug: "srv" });
+    expect(check).not.toHaveBeenCalled();
+    expect(clearOverride).toHaveBeenCalled();
   });
 });

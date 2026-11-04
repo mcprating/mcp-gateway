@@ -29,6 +29,7 @@ export function registerAudit(server: McpServer, auditLog: AuditLog): void {
           "egress_blocked",
           "egress_allowed",
           "personal_data_requested",
+          "approval",
           "disconnect",
         ])
         .optional()
@@ -72,7 +73,7 @@ export function registerAudit(server: McpServer, auditLog: AuditLog): void {
           lines.push(`### Recent events (${events.length})`, "");
           for (const e of events) {
             const icon =
-              e.type === "tool_blocked" || e.type === "egress_blocked"
+              e.type === "tool_blocked" || e.type === "egress_blocked" || (e.type === "approval" && e.ok === false)
                 ? "🚫"
                 : e.type === "tool_call" && e.ok === false
                   ? "⚠️"

@@ -19,7 +19,7 @@ export function registerConnect(
 ): void {
   server.tool(
     "mcp_connect",
-    "Connect to an MCP server and make its tools available. Provide either a server slug (from mcp_discover) to look up in the registry, OR an explicit command + args to spawn directly, OR a url for remote servers.",
+    "Connect to an MCP server and make its tools available. Provide either a server slug (from mcp_discover) to look up in the registry, OR an explicit command + args to spawn directly, OR a url for remote servers. An explicit command needs the person's approval, which the gateway asks for itself.",
     {
       slug: z
         .string()
@@ -31,7 +31,7 @@ export function registerConnect(
         .string()
         .optional()
         .describe(
-          "Explicit command to spawn (e.g., 'npx'). Use when server is not in registry.",
+          "Explicit command to spawn (e.g., 'npx'). Use when server is not in registry. The gateway asks the person first, and refuses if the client can't ask.",
         ),
       args: z
         .array(z.string())
@@ -59,7 +59,7 @@ export function registerConnect(
         .boolean()
         .optional()
         .describe(
-          "Set to true to confirm connection to community/unknown trust tier servers. Required when the initial connect returns a confirmation warning.",
+          "Set to true to confirm connection to community/unknown trust tier servers, once the user has said yes. Required when the initial connect returns a confirmation warning. Where the client can ask the person directly, the gateway does that instead and this has no effect.",
         ),
       saveProfile: z
         .boolean()

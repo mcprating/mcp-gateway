@@ -23,6 +23,14 @@ export interface GatewayConfig {
    */
   minQualityScore?: number;
 
+  /**
+   * False turns the human gate off: the model decides on raw commands and on
+   * widening a server's limits, as it did before. Anything else leaves it on
+   * (see permissions/human-gate.ts). Only the gateway's own configuration sets
+   * this; no tool does.
+   */
+  humanApproval?: boolean;
+
   /** Timeout for proxied tool calls in milliseconds */
   proxyTimeoutMs: number;
 

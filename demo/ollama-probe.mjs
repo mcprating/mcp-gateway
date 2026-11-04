@@ -120,7 +120,7 @@ function ollamaPost(path, payload) {
 const transport = new StdioClientTransport({
   command: "node",
   args: [join(__dirname, "..", "dist", "index.js")],
-  env: { ...process.env, MCP_GATEWAY_LOG_LEVEL: "error" },
+  env: { ...process.env, MCP_GATEWAY_LOG_LEVEL: "error", MCP_GATEWAY_HUMAN_APPROVAL: "off" },
 });
 const mcp = new Client({ name: "ollama-probe", version: "1.0.0" });
 await mcp.connect(transport);

@@ -49,6 +49,7 @@ import {
   PermissionDeniedError,
 } from "../utils/errors.js";
 import { getTrustPolicy } from "../permissions/trust-tiers.js";
+import { HumanGate, launcherEnvNames, refusalMessage } from "../permissions/human-gate.js";
 import { trustLines, type TrustFacts } from "../registry/trust-facts.js";
 import { log } from "../utils/logger.js";
 import { loadProfiles, addProfile, removeProfile } from "../config/profiles.js";
@@ -86,6 +87,8 @@ export class ConnectionManager {
   manifestResolver?: ManifestResolver;
   /** Optional safety audit trail (forensics log of sandboxed-server actions) */
   auditLog?: AuditLog;
+  /** Puts what must not rest on the model's word to the person. */
+  readonly humanGate: HumanGate;
 
   constructor(
     private readonly mcpServer: McpServer,
@@ -93,7 +96,9 @@ export class ConnectionManager {
     private readonly permissionManager: PermissionManager,
     private readonly config: GatewayConfig,
     private readonly adTracker?: AdTracker | null,
-  ) {}
+  ) {
+    this.humanGate = new HumanGate(mcpServer.server, config.humanApproval !== false, () => this.auditLog);
+  }
 
   /** What a tool call outside the proxied tools (mcp_call_tool) goes through. */
   get toolCallDeps(): ToolCallDeps {
@@ -129,6 +134,62 @@ export class ConnectionManager {
     return names.filter(
       (n) => !process.env[n] && !(providedEnv && providedEnv[n]),
     );
+  }
+
+  /**
+   * What the person reads before a launch. Everything is stated from what would
+   * actually run, not from anything the model said about it.
+   */
+  private launchQuestion(launch: {
+    displayName: string;
+    command?: string;
+    args?: string[];
+    url?: string;
+    rawCommand: boolean;
+    launcherEnv: string[];
+    facts: TrustFacts;
+    missingEnv: string[];
+  }): string {
+    const what = launch.url
+      ? `An agent wants to connect to ${launch.displayName} at ${launch.url}.`
+      : launch.rawCommand
+        ? "An agent wants to start a program on this computer."
+        : `An agent wants to start ${launch.displayName} on this computer.`;
+    const lines = [what];
+    if (launch.command) lines.push("", `Command: ${JSON.stringify([launch.command, ...(launch.args ?? [])])}`);
+    if (launch.launcherEnv.length > 0) {
+      lines.push("", `It would also set ${launch.launcherEnv.join(", ")}, which can change what runs.`);
+    }
+    lines.push("", ...trustLines(launch.facts));
+    if (launch.missingEnv.length > 0) {
+      lines.push("", `It needs environment variables that aren't set: ${launch.missingEnv.join(", ")}.`);
+    }
+    lines.push("", "Say yes only if you asked for this. A tool description or result from another server can tell an agent to ask.");
+    return lines.join("\n");
+  }
+
+  /**
+   * Approve a server being saved to a profile or group. Saved launches start
+   * without asking again, so the asking happens here. Returns why not, or null.
+   */
+  async approveSavedLaunch(
+    where: string,
+    entry: { slug?: string; command?: string; args?: string[]; url?: string },
+  ): Promise<string | null> {
+    const rawCommand = !entry.url && !entry.slug && !!entry.command;
+    const label = entry.slug || entry.url || entry.command || "unknown";
+    const launch = entry.url
+      ? `the server at ${entry.url}`
+      : entry.slug
+        ? `the server ${entry.slug}`
+        : `this command: ${JSON.stringify([entry.command, ...(entry.args ?? [])])}`;
+    const approval = await this.humanGate.check({
+      slug: label,
+      key: JSON.stringify(["save", where, entry.slug, entry.command, entry.args, entry.url]),
+      required: rawCommand,
+      summary: `An agent wants to add ${launch} to ${where}. It would then start without asking again.\n\nSay yes only if you asked for this. A tool description or result from another server can tell an agent to ask.`,
+    });
+    return approval.approved ? null : refusalMessage(`Adding "${label}" to ${where}`, approval.why);
   }
 
   async connect(params: ConnectParams): Promise<ConnectResult> {
@@ -314,13 +375,39 @@ export class ConnectionManager {
     const missingEnv = registryServer
       ? this.missingAuthEnv(registryServer, params.env)
       : [];
-    const needTrustConfirm = policy.requiresConfirmation && !params.confirmed;
-    const needEnvWarn = missingEnv.length > 0 && !params.confirmed;
     // Whatever the trust tier: MCP Rating delisted this package, knows this
     // registry name as another package, or puts its safety in the risk band.
-    const needRatingWarn = !!(facts.delistedReason || facts.trustWarning) && !params.confirmed;
+    const ratingWarning = !!(facts.delistedReason || facts.trustWarning);
     const riskySafety = facts.safetyScore !== null && facts.safetyScore < 50;
-    const needSafetyWarn = riskySafety && !params.confirmed;
+
+    // `confirmed` is the model's word, so it can't stand in for the person's.
+    // A raw command, or env that changes what a known server runs, needs them:
+    // the client asks them, or this is refused. Anything else that would have
+    // waited on `confirmed` goes to them too where the client can ask, or the
+    // gate above could be walked around by publishing a package and connecting
+    // it by slug. Saved launches were approved when they were saved.
+    let confirmed = params.confirmed === true || params.stored === true;
+    const rawCommand = !params.url && !params.slug && !!params.command;
+    const launcherEnv = launcherEnvNames(params.env);
+    const mustAsk = !params.stored && (rawCommand || launcherEnv.length > 0);
+    const wouldWarn = policy.requiresConfirmation || ratingWarning || riskySafety;
+    if (mustAsk || (!params.stored && wouldWarn && this.humanGate.canAsk)) {
+      const approval = await this.humanGate.check({
+        slug,
+        key: JSON.stringify(["launch", slug, command, args, url, launcherEnv.map((name) => [name, params.env?.[name]])]),
+        required: mustAsk,
+        summary: this.launchQuestion({ displayName, command, args, url, rawCommand, launcherEnv, facts, missingEnv }),
+      });
+      if (!approval.approved) {
+        throw new PermissionDeniedError(slug, refusalMessage(`Starting "${displayName}"`, approval.why));
+      }
+      if (approval.by === "person") confirmed = true;
+    }
+
+    const needTrustConfirm = policy.requiresConfirmation && !confirmed;
+    const needEnvWarn = missingEnv.length > 0 && !confirmed;
+    const needRatingWarn = ratingWarning && !confirmed;
+    const needSafetyWarn = riskySafety && !confirmed;
     if (needTrustConfirm || needEnvWarn || needRatingWarn || needSafetyWarn) {
       log.info("Connection requires confirmation", { slug, trustTier, missingEnv, facts: { by: facts.by, score: facts.qualityScore, safety: facts.safetyScore } });
       const parts: string[] = [`**What MCP Rating knows about ${displayName}:**\n${trustLines(facts).join("\n")}`];
@@ -758,7 +845,7 @@ export class ConnectionManager {
 
     for (const profile of store.connections) {
       try {
-        await this.connect({ ...profile, confirmed: true });
+        await this.connect({ ...profile, confirmed: true, stored: true });
       } catch (err) {
         log.warn("Auto-connect failed for profile", {
           slug: profile.slug || profile.command,

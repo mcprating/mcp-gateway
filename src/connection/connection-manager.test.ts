@@ -52,6 +52,8 @@ const config = {
   reconnectBaseDelayMs: 1,
   enableAutoInstall: false,
   profilesPath: "unused",
+  // These tests start servers from a script. The gate has its own, below.
+  humanApproval: false,
 } as unknown as GatewayConfig;
 
 function manifest(network: CapabilityManifest["network"]): CapabilityManifest {
@@ -435,5 +437,156 @@ describe("trust data at connect", () => {
     const summary = await cm.connect({ command: "npx", args: ["-y", "known-pkg"] });
     expect(createTransport).toHaveBeenCalledOnce();
     await cm.disconnect((summary as { slug: string }).slug, { removeProfile: false });
+  });
+});
+
+describe("the human gate at connect", () => {
+  const trusted = {
+    by: "mcprating.io", consulted: true, url: "https://mcprating.io/servers/known-pkg", qualityScore: 71,
+    tier: "trusted" as const, safetyScore: 90, safetyFlags: [] as string[], verification: null, maintenance: null,
+    delistedReason: null, trustWarning: null,
+  };
+  const unverified = { ...trusted, by: null, url: null, qualityScore: null, tier: "unknown" as const, safetyScore: null };
+  const yes = { action: "accept", content: { approve: true } };
+
+  /** With the gate on, as a user's gateway has it. `answer` undefined: a client that can't ask. */
+  function gated(facts: typeof trusted | typeof unverified, answer?: unknown) {
+    const elicitInput = vi.fn(async () => answer);
+    const server = {
+      ...mcpServer,
+      server: { getClientCapabilities: () => (answer ? { elicitation: { form: {} } } : {}), elicitInput },
+    };
+    const registry = {
+      ratesPackages: true,
+      registries: [{ label: "mcprating.io", kind: "mcprating" }],
+      factsForLaunch: async () => facts,
+      factsFor: () => facts,
+      getServer: async (slug: string) => ({ slug, name: slug, authDetails: { envVars: [] } }),
+      resolveInstallCommand: () => ({ command: "npx", args: ["-y", "from-registry"] }),
+    };
+    const cm = new ConnectionManager(
+      server as never,
+      registry as never,
+      { isToolAllowed: () => true } as never,
+      { ...config, humanApproval: undefined } as GatewayConfig,
+    );
+    return { cm, elicitInput };
+  }
+
+  it("refuses a raw command when the client can't ask, whatever the model says, and starts nothing", async () => {
+    const { cm } = gated(trusted);
+    await expect(cm.connect({ command: "npx", args: ["-y", "known-pkg"], confirmed: true })).rejects.toThrow(
+      /needs a person's approval.*MCP_GATEWAY_HUMAN_APPROVAL=off/,
+    );
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it("puts a raw command to the person, showing exactly what would run", async () => {
+    const { cm, elicitInput } = gated(unverified, yes);
+    const summary = await cm.connect({ command: "node", args: ["evil.js", "--flag"] });
+    expect(summary).toMatchObject({ slug: "node-flag" });
+    const question = (elicitInput.mock.calls[0] as unknown as [{ message: string }])[0].message;
+    expect(question).toContain('Command: ["node","evil.js","--flag"]');
+    expect(createTransport).toHaveBeenCalledOnce();
+    await cm.disconnect("node-flag", { removeProfile: false });
+  });
+
+  it("starts nothing when the person says no, and confirmed: true changes nothing", async () => {
+    const { cm } = gated(unverified, { action: "decline" });
+    await expect(cm.connect({ command: "node", args: ["evil.js"], confirmed: true })).rejects.toThrow(/declined by the person/);
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it("doesn't ask again about a launch the person declined, but does about a different one", async () => {
+    const { cm, elicitInput } = gated(unverified, { action: "decline" });
+    await expect(cm.connect({ command: "node", args: ["evil.js"] })).rejects.toThrow(/declined by the person/);
+    await expect(cm.connect({ command: "node", args: ["evil.js"], confirmed: true })).rejects.toThrow(/already declined/);
+    expect(elicitInput).toHaveBeenCalledOnce();
+    await expect(cm.connect({ command: "node", args: ["other.js"] })).rejects.toThrow(/declined by the person/);
+    expect(elicitInput).toHaveBeenCalledTimes(2);
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it("tells a saved launch from a live one: declining one doesn't answer the other", async () => {
+    const { cm, elicitInput } = gated(unverified, { action: "decline" });
+    const entry = { command: "node", args: ["evil.js"] };
+    await expect(cm.connect(entry)).rejects.toThrow(/declined by the person/);
+    expect(await cm.approveSavedLaunch('profile "work"', entry)).toMatch(/declined by the person/);
+    expect(await cm.approveSavedLaunch('profile "work"', entry)).toMatch(/already declined/);
+    expect(elicitInput).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks even for a raw command that names a package MCP Rating trusts", async () => {
+    const { cm, elicitInput } = gated(trusted, { action: "decline" });
+    await expect(cm.connect({ command: "npx", args: ["-y", "known-pkg"] })).rejects.toThrow(/declined/);
+    expect(elicitInput).toHaveBeenCalledOnce();
+  });
+
+  it("takes env that changes what a trusted server runs as a raw launch", async () => {
+    const { cm } = gated(trusted);
+    await expect(cm.connect({ slug: "known-pkg", env: { NODE_OPTIONS: "--require x.js" } })).rejects.toThrow(/needs a person's approval/);
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it("lets a trusted server by slug start with no question, and ordinary env with it", async () => {
+    const { cm, elicitInput } = gated(trusted, { action: "decline" });
+    const summary = await cm.connect({ slug: "known-pkg", env: { GITHUB_TOKEN: "x" } });
+    expect(elicitInput).not.toHaveBeenCalled();
+    await cm.disconnect((summary as { slug: string }).slug, { removeProfile: false });
+  });
+
+  it("asks the person about an unverified package by slug, and ignores the model's confirmed: true", async () => {
+    const { cm, elicitInput } = gated(unverified, { action: "decline" });
+    await expect(cm.connect({ slug: "evil-pkg", confirmed: true })).rejects.toThrow(/declined/);
+    expect(elicitInput).toHaveBeenCalledOnce();
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it("connects an unverified package by slug on the person's yes, in one call", async () => {
+    const { cm } = gated(unverified, yes);
+    const summary = await cm.connect({ slug: "evil-pkg" });
+    expect(summary).toMatchObject({ slug: "evil-pkg" });
+    await cm.disconnect("evil-pkg", { removeProfile: false });
+  });
+
+  it("falls back to the model's confirmation for a slug where the client can't ask", async () => {
+    const { cm } = gated(unverified);
+    expect(await cm.connect({ slug: "evil-pkg" })).toMatchObject({ needsConfirmation: true });
+    expect(createTransport).not.toHaveBeenCalled();
+    await cm.connect({ slug: "evil-pkg", confirmed: true });
+    expect(createTransport).toHaveBeenCalledOnce();
+    await cm.disconnect("evil-pkg", { removeProfile: false });
+  });
+
+  it("starts a saved launch without asking: it was approved when saved", async () => {
+    const { cm } = gated(unverified);
+    const summary = await cm.connect({ command: "node", args: ["saved.js"], stored: true });
+    expect(createTransport).toHaveBeenCalledOnce();
+    await cm.disconnect((summary as { slug: string }).slug, { removeProfile: false });
+  });
+
+  it("behaves as before with the gate off", async () => {
+    const cm = new ConnectionManager(
+      mcpServer as never,
+      { ratesPackages: true, registries: [], factsForLaunch: async () => unverified } as never,
+      { isToolAllowed: () => true } as never,
+      { ...config, humanApproval: false } as GatewayConfig,
+    );
+    expect(await cm.connect({ command: "node", args: ["x.js"] })).toMatchObject({ needsConfirmation: true });
+    const summary = await cm.connect({ command: "node", args: ["x.js"], confirmed: true });
+    expect(createTransport).toHaveBeenCalledOnce();
+    await cm.disconnect((summary as { slug: string }).slug, { removeProfile: false });
+  });
+
+  it("guards what gets saved: a raw command needs a person, a slug only where one can be asked", async () => {
+    const entry = { command: "node", args: ["evil.js"] };
+    expect(await gated(unverified).cm.approveSavedLaunch('profile "work"', entry)).toMatch(/needs a person's approval/);
+    expect(await gated(unverified).cm.approveSavedLaunch('profile "work"', { slug: "x" })).toBeNull();
+    expect(await gated(unverified, { action: "decline" }).cm.approveSavedLaunch('group "g"', { slug: "x" })).toMatch(/declined/);
+    const asked = gated(unverified, yes);
+    expect(await asked.cm.approveSavedLaunch('group "g"', entry)).toBeNull();
+    const question = (asked.elicitInput.mock.calls[0] as unknown as [{ message: string }])[0].message;
+    expect(question).toContain('["node","evil.js"]');
+    expect(question).toContain("start without asking again");
   });
 });
