@@ -250,7 +250,7 @@ Every connected server is labeled with a trust tier based on its MCP-Rating qual
 A safety score in the risk band caps the tier, as it does on the site: below 50
 a server is at most [Community], below 30 it is [Unverified].
 
-### What `mcp_connect` shows, and when it asks first
+### What `mcp_connect` shows, and when it stops
 
 Before anything starts, `mcp_connect` looks up what MCP Rating knows about the
 package that would run — from the registry entry, or, for an explicit `command`
@@ -263,10 +263,12 @@ the endpoint). A known package started by command is judged as itself, not as
 - MCP Rating's own start test: started, didn't start, needs credentials, or not tested;
 - last release and last code push, with where each date comes from.
 
-It asks for confirmation for a [Community] or [Unverified] server, and, whatever
-the tier, when the safety score is in the risk band, MCP Rating has delisted the
+It stops and returns a warning for a [Community] or [Unverified] server, and,
+whatever the tier, when the safety score is in the risk band, MCP Rating has delisted the
 package, or a registry name points at a different package than MCP Rating knows
-by that name.
+by that name. The warning goes to the agent, and `confirmed: true` on the retry is
+a field the model fills in. So this protects you as far as the model passes the
+warning on and your client asks before a tool call, and no further.
 
 ### A minimum score
 
@@ -317,11 +319,11 @@ MCP Rating's mirror of it.
   same npm or PyPI package, Docker image or hosted endpoint — in one request per
   search. It is matched by package, never by name: any registry can give any
   package a well-known name. Otherwise the server shows as *unrated* and
-  [Unverified], so connecting it asks for confirmation. Numbers another
+  [Unverified], so connecting it returns a warning first. Numbers another
   registry puts in its own entries (`_meta`) are not read: anyone can write them.
 - **Warnings that stop a connect.** If MCP Rating knows a server's registry name
   as a different package, or has delisted the package, `mcp_discover` says so,
-  lists it last, and `mcp_connect` asks for confirmation whatever its trust tier.
+  lists it last, and `mcp_connect` returns a warning whatever its trust tier.
 - **The partner key goes to MCP Rating only**, never to another registry.
 
 The official registry's search matches server names only and was slow when this
@@ -457,6 +459,35 @@ Allowlist patterns fail **closed**: a malformed pattern such as `*example.com`
 (missing dot) matches nothing rather than everything. The gateway warns at
 startup about patterns that will not do what their author intended, including
 over-broad ones like `*.com`.
+
+### What it doesn't stop: tool poisoning
+
+A server doesn't have to run anything to attack you. Its tool descriptions and
+results are text that goes straight to your model, and that text can tell the
+model to read a file through another server and send it somewhere. The data moves
+through tools you trust, so L1 and L2 don't touch it: they limit what a server's
+*code* can do.
+
+[A November 2026 measurement](https://arxiv.org/abs/2611.03555) ran 45 of these attacks through 12 agent
+frameworks and 18 models. In 22.9% of runs the model made a call the attacker asked
+for, from 0.4% to 49.7% depending on the model, and no framework defended against it
+on purpose. It didn't test this gateway or a client such as Claude Code or Cursor,
+and we haven't measured either yet.
+
+The gateway passes descriptions and results on as the server wrote them, with a
+trust label in front of each description. It doesn't scan them, and when a server
+changes its tool list it forwards the new one without comparing it to the old.
+
+The model can reach the gateway's own controls too. `mcp_connect` can start a
+command, and `mcp_sandbox` can widen a server's limits, including which of your
+environment variables it receives. So what a poisoned description can ask for
+includes undoing L1 for one server. Until that changes:
+
+- Connect only what you need.
+- Keep your client's approval prompt on for tool calls, `mcp_connect` and
+  `mcp_sandbox` above all.
+- Which model you run matters: in that measurement it mattered far more than which
+  framework.
 
 ### What is not covered
 

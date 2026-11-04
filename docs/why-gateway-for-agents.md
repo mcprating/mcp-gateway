@@ -53,8 +53,8 @@ The agent can apply a policy — *"only connect to Community or better"* — ins
 running whatever it found. For a system deciding autonomously which third-party code to
 execute, that's the difference between selection and gambling.
 
-Connecting to something untrusted **stops and asks first**: the Gateway returns a warning
-and requires `confirmed: true` on the retry. Missing required env vars are reported *before*
+Connecting to something untrusted **stops first**: the Gateway returns a warning to the
+agent and requires `confirmed: true` on the retry. Missing required env vars are reported *before*
 the process is spawned rather than surfacing as an opaque crash.
 
 ### 3. Containment is the default
