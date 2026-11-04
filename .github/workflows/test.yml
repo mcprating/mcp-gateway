@@ -35,3 +35,4 @@ jobs:
       # The human gate against the built gateway over stdio, with a real MCP
       # client answering. The unit tests fake that client.
       - run: node demo/human-gate-check.mjs
+      - run: node demo/data-check.mjs
