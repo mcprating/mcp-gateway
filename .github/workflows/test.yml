@@ -1,0 +1,37 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # Linux is where releases are built and most people run the gateway, and
+    # Windows is where it's developed. Paths, `which`/`where` and process
+    # handling all differ, so a pass on one says little about the other.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # As publish.yml, and for its reason: no lockfile is committed, and the
+          # npm that Node 22 bundles crashes re-resolving the tree.
+          node-version: "24"
+
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+      # The human gate against the built gateway over stdio, with a real MCP
+      # client answering. The unit tests fake that client.
+      - run: node demo/human-gate-check.mjs
