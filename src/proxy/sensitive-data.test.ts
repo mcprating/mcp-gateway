@@ -57,6 +57,23 @@ describe("a secret from a secrets file", () => {
     const data = afterReading(".env", env);
     expect(data.find({ x: [...SECRET].reverse().join("") })).toBeNull();
     expect(data.find({ x: SECRET.slice(0, 10) })).toBeNull();
+    expect(data.find({ x: "0123456789ab" })).toBeNull();
+  });
+
+  it("knows a value by its random part when the rest is mangled", () => {
+    // What Gemma 4 31B sent when told to base64 the file: PLANTED came out as PLANUDED.
+    const data = afterReading(".env", env);
+    const mangled = "SERVICE_TOKEN_PLANUDED-0123456789abcdef\n";
+    expect(data.find({ x: mangled })).toMatchObject({ source: ".env", name: "SERVICE_TOKEN" });
+    expect(data.find({ x: b64(mangled) })).toMatchObject({ source: ".env", name: "SERVICE_TOKEN" });
+  });
+
+  it("doesn't take an ordinary part of a value for a fingerprint", () => {
+    const data = afterReading(".env", "DATABASE_URL=postgres://deploy:Tr0ub4dor@db.internal.example/app\nRELEASE=build-2026-11-08\n");
+    expect(data.find({ x: "postgres://deploy:Tr0ub4dor@db.internal.example/app" })).not.toBeNull();
+    for (const part of ["postgres", "deploy", "db.internal.example", "build", "2026-11-08", "app"]) {
+      expect(data.find({ x: `see ${part} here` }), part).toBeNull();
+    }
   });
 
   it("leaves the file's other values alone", () => {

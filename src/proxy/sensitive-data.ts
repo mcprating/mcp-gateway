@@ -19,8 +19,11 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
  * and page cursors and expect them back, so a name like "token" proves nothing
  * outside such a file.
  *
- * It compares text. Standard encodings are undone, but a secret the model has
- * rewritten some other way, or one in a file nothing marks out, goes by unseen.
+ * It compares text. Standard encodings are undone, and a value's random part
+ * counts on its own: Gemma 4 31B, told to base64 a .env, kept the 16 random
+ * characters of a token and mangled the constant prefix in front of them. But a
+ * secret the model has rewritten some other way, or one in a file nothing marks
+ * out, goes by unseen.
  * It only knows what came through the gateway, too: a client's own file tools
  * don't. Secrets are held in memory for the session and never logged or shown:
  * the person is told where one came from, not what it is.
@@ -195,6 +198,18 @@ function views(text: string): string[] {
   return found;
 }
 
+/**
+ * A run of letters and digits, long enough that it doesn't turn up by chance.
+ * Both must be in it: a word or a number is no fingerprint.
+ */
+const RANDOM_PART = /[A-Za-z0-9]{12,}/g;
+
+/** A value, and its random parts as fingerprints of their own. */
+function fingerprints(value: string): string[] {
+  const parts = (value.match(RANDOM_PART) ?? []).filter((part) => part !== value && /[A-Za-z]/.test(part) && /\d/.test(part));
+  return [value, ...new Set(parts)];
+}
+
 export class SensitiveData {
   private readonly secrets = new Map<string, KnownSecret>();
 
@@ -206,13 +221,15 @@ export class SensitiveData {
     const file = secretFileIn(args);
     const source = file ?? `${slug}'s ${toolName}`;
     for (const { value, name } of file ? secretsInFile(text) : credentialsIn(text)) {
-      const known = this.secrets.get(value);
-      if (known) {
-        known.servers.add(slug);
-        continue;
+      for (const fingerprint of fingerprints(value)) {
+        const known = this.secrets.get(fingerprint);
+        if (known) {
+          known.servers.add(slug);
+          continue;
+        }
+        this.secrets.set(fingerprint, { source, name: name?.slice(0, MAX_LABEL), servers: new Set([slug]) });
+        if (this.secrets.size > MAX_SECRETS) this.secrets.delete(this.secrets.keys().next().value as string);
       }
-      this.secrets.set(value, { source, name: name?.slice(0, MAX_LABEL), servers: new Set([slug]) });
-      if (this.secrets.size > MAX_SECRETS) this.secrets.delete(this.secrets.keys().next().value as string);
     }
   }
 

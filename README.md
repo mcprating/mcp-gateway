@@ -560,7 +560,8 @@ that risks nothing: a server lying about it already has the value, and it covers
 other server's. Most servers don't declare it, so expect a question there.
 
 It misses a secret in a file nothing marks out, with no credential's shape. It misses
-one the model has rewritten in some other way, and part of one. It sees only what
+one the model has rewritten in some other way, and part of one, though the random part
+of a value counts on its own, so a mangled prefix doesn't hide it. It sees only what
 comes through the gateway, so it knows nothing a client's own file tools read, and it
 covers tool calls, not resources, prompts or what the model says in its reply.
 `demo/data-check.mjs` runs the attacks and these limits against a built gateway.
