@@ -557,7 +557,8 @@ A tool on the server the value came from is asked about too, because `http_post`
 beside `read_file` is how data leaves. The exception is a tool declaring
 `openWorldHint: false`, so saving `.env` again needn't cost a question. Believing
 that risks nothing: a server lying about it already has the value, and it covers no
-other server's. Most servers don't declare it, so expect a question there.
+other server's. Most servers don't declare it, so expect a question there, or a refusal
+where your client can't ask.
 
 It misses a secret in a file nothing marks out, with no credential's shape. It misses
 one the model has rewritten in some other way, and part of one, though the random part
