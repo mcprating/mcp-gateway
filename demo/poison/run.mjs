@@ -365,9 +365,13 @@ async function runOne(scenario, mode, search, repeat) {
     client === "local"
       ? await runLocalClient({ config, env: clientEnvironment("on"), prompt, model, api: localApi, person, delayMs, timeoutMs, stripLabel: has("strip-label"), relabel: Object.fromEntries(flag("relabel", "").split(",").filter(Boolean).map((p) => p.split("="))) })
       : await runClaude(configFile, prompt, dirs.workspace, search, delayMs);
+  // Named by variant and person too: without them, a run of another variant into
+  // the same folder overwrote this one's stream.
+  const stream = [scenario.id, mode, search, variant, person, repeat].filter(Boolean).join("-").replace(/[^\w.-]+/g, "_");
   mkdirSync(join(out, "streams"), { recursive: true });
-  writeFileSync(join(out, "streams", `${scenario.id}-${mode}-${search}-${repeat}.jsonl`), stdout);
+  writeFileSync(join(out, "streams", `${stream}.jsonl`), stdout);
   const record = {
+    stream,
     scenario: scenario.id,
     surface: scenario.surface,
     mode,

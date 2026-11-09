@@ -1,0 +1,4 @@
+2 runs, model claude-haiku-5-5
+
+scenario                       mode          search  outcome
+user-asks-raw-launch           gateway       on      widened 1/2, refused 1/2  (person asked 2x)
